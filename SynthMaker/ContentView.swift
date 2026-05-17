@@ -8,71 +8,76 @@ struct ContentView: View {
     private let rootFrequency = 110.0
 
     var body: some View {
-        ZStack {
+        VStack(spacing: 0) {
             AcidBackdrop()
+                .overlay {
+                    ScrollView(showsIndicators: false) {
+                        VStack(spacing: 18) {
+                            HeaderView(frequency: synth.frequency)
 
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 18) {
-                    HeaderView(frequency: synth.frequency)
+                            SignalScope(
+                                waveform: Int(synth.waveform.rounded()),
+                                cutoff: synth.filterCutoff,
+                                resonance: synth.resonance
+                            )
 
-                    SignalScope(
-                        waveform: Int(synth.waveform.rounded()),
-                        cutoff: synth.filterCutoff,
-                        resonance: synth.resonance
-                    )
+                            ControlPanel(title: "OSCILLATOR", systemImage: "waveform.path.ecg") {
+                                ParameterSlider(
+                                    title: "Tune",
+                                    value: $synth.frequency,
+                                    range: 20...2000,
+                                    displayValue: format(synth.frequency, suffix: " Hz")
+                                )
 
-                    ControlPanel(title: "OSCILLATOR", systemImage: "waveform.path.ecg") {
-                        ParameterSlider(
-                            title: "Tune",
-                            value: $synth.frequency,
-                            range: 20...2000,
-                            displayValue: format(synth.frequency, suffix: " Hz")
-                        )
+                                WaveformPicker(selection: $synth.waveform)
+                            }
 
-                        WaveformPicker(selection: $synth.waveform)
+                            ControlPanel(title: "FILTER", systemImage: "slider.horizontal.3") {
+                                ParameterSlider(
+                                    title: "Cutoff",
+                                    value: $synth.filterCutoff,
+                                    range: 20...20000,
+                                    displayValue: format(synth.filterCutoff, suffix: " Hz")
+                                )
+
+                                ParameterSlider(
+                                    title: "Resonance",
+                                    value: $synth.resonance,
+                                    range: 0...10,
+                                    displayValue: format(synth.resonance, suffix: " dB")
+                                )
+
+                                ParameterSlider(
+                                    title: "Env Mod",
+                                    value: $synth.envelopeAmount,
+                                    range: 0...1,
+                                    displayValue: percent(synth.envelopeAmount)
+                                )
+                            }
+
+                            ControlPanel(title: "ENVELOPE", systemImage: "point.topleft.down.curvedto.point.bottomright.up") {
+                                EnvelopeGrid(synth: synth)
+                            }
+
+                            KeyboardView(synth: synth)
+
+                            StepSequencer(
+                                selectedStep: $selectedStep,
+                                steps: steps,
+                                rootFrequency: rootFrequency,
+                                play: playStep
+                            )
+                        }
+                        .padding(.horizontal, 18)
+                        .padding(.top, 20)
+                        .padding(.bottom, 28)
                     }
-
-                    ControlPanel(title: "FILTER", systemImage: "slider.horizontal.3") {
-                        ParameterSlider(
-                            title: "Cutoff",
-                            value: $synth.filterCutoff,
-                            range: 20...20000,
-                            displayValue: format(synth.filterCutoff, suffix: " Hz")
-                        )
-
-                        ParameterSlider(
-                            title: "Resonance",
-                            value: $synth.resonance,
-                            range: 0...10,
-                            displayValue: format(synth.resonance, suffix: " dB")
-                        )
-
-                        ParameterSlider(
-                            title: "Env Mod",
-                            value: $synth.envelopeAmount,
-                            range: 0...1,
-                            displayValue: percent(synth.envelopeAmount)
-                        )
-                    }
-
-                    ControlPanel(title: "ENVELOPE", systemImage: "point.topleft.down.curvedto.point.bottomright.up") {
-                        EnvelopeGrid(synth: synth)
-                    }
-
-                    KeyboardView(synth: synth)
-
-                    StepSequencer(
-                        selectedStep: $selectedStep,
-                        steps: steps,
-                        rootFrequency: rootFrequency,
-                        play: playStep
-                    )
                 }
-                .padding(.horizontal, 18)
-                .padding(.top, 20)
-                .padding(.bottom, 28)
-            }
+
+            AdMobBannerView()
+                .background(Color.black)
         }
+        .ignoresSafeArea(.keyboard)
     }
 
     private func playStep(_ index: Int) {
