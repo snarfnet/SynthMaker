@@ -1,9 +1,18 @@
 # SynthMaker Privacy Policy
 
-SynthMaker does not collect, store, or share personal data.
+SynthMaker lets you play synthesizer sounds on your device. The app does not require an account or login.
 
-The app runs locally on your device. It uses the device audio system to play synthesizer sounds, and it does not require an account, login, analytics service, advertising network, or external server.
+## Audio
 
-If this changes in a future version, this policy will be updated before the change is released.
+SynthMaker uses the device audio system to generate and play sounds. Audio is processed on your device. The app does not record audio.
 
-Contact: tokyonasu@yahoo.co.jp
+## Advertising
+
+SynthMaker shows ads using Google AdMob. AdMob may collect device information, advertising identifiers, approximate location, and ad interaction data to deliver and measure ads.
+
+You can learn more about how Google uses data here:
+https://policies.google.com/technologies/partner-sites
+
+## Contact
+
+tokyonasu@yahoo.co.jp
