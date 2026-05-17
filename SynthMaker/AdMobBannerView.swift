@@ -7,14 +7,15 @@ struct AdMobBannerView: View {
     var body: some View {
         GeometryReader { proxy in
             let width = max(proxy.size.width, 320)
+            let adSize = largeAnchoredAdaptiveBanner(width: width)
             BannerContainer(
                 adUnitID: adUnitID,
-                adSize: AdSize.largeAnchoredAdaptiveBanner(width: width)
+                adSize: adSize
             )
-            .frame(width: width, height: AdSize.largeAnchoredAdaptiveBanner(width: width).size.height)
+            .frame(width: width, height: adSize.size.height)
             .frame(maxWidth: .infinity)
         }
-        .frame(height: 64)
+        .frame(height: 96)
     }
 }
 
