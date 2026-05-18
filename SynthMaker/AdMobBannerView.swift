@@ -1,5 +1,6 @@
 import SwiftUI
 import GoogleMobileAds
+import UIKit
 
 struct AdMobBannerView: View {
     @EnvironmentObject private var ads: AdMobController
@@ -31,11 +32,23 @@ private struct BannerContainer: UIViewRepresentable {
     func makeUIView(context: Context) -> BannerView {
         let banner = BannerView(adSize: adSize)
         banner.adUnitID = adUnitID
+        banner.rootViewController = UIApplication.shared.activeRootViewController
         banner.load(Request())
         return banner
     }
 
     func updateUIView(_ banner: BannerView, context: Context) {
         banner.adSize = adSize
+        banner.rootViewController = UIApplication.shared.activeRootViewController
+    }
+}
+
+private extension UIApplication {
+    var activeRootViewController: UIViewController? {
+        connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first { $0.isKeyWindow }?
+            .rootViewController
     }
 }

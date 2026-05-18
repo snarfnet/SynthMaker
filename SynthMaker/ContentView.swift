@@ -9,70 +9,70 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            AcidBackdrop()
-                .overlay {
-                    ScrollView(showsIndicators: false) {
-                        VStack(spacing: 18) {
-                            HeaderView(frequency: synth.frequency)
+            CosmicBackdrop {
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 14) {
+                        HeaderView(frequency: synth.frequency)
 
-                            SignalScope(
-                                waveform: Int(synth.waveform.rounded()),
-                                cutoff: synth.filterCutoff,
-                                resonance: synth.resonance
+                        SignalScope(
+                            waveform: Int(synth.waveform.rounded()),
+                            cutoff: synth.filterCutoff,
+                            resonance: synth.resonance
+                        )
+
+                        ControlPanel(title: "OSCILLATOR", systemImage: "waveform.path") {
+                            ParameterSlider(
+                                title: "Tune",
+                                value: $synth.frequency,
+                                range: 20...2000,
+                                displayValue: format(synth.frequency, suffix: " Hz")
                             )
 
-                            ControlPanel(title: "OSCILLATOR", systemImage: "waveform.path.ecg") {
-                                ParameterSlider(
-                                    title: "Tune",
-                                    value: $synth.frequency,
-                                    range: 20...2000,
-                                    displayValue: format(synth.frequency, suffix: " Hz")
-                                )
+                            WaveformPicker(selection: $synth.waveform)
+                        }
 
-                                WaveformPicker(selection: $synth.waveform)
-                            }
+                        ControlPanel(title: "FILTER MATRIX", systemImage: "slider.horizontal.3") {
+                            ParameterSlider(
+                                title: "Cutoff",
+                                value: $synth.filterCutoff,
+                                range: 20...20000,
+                                displayValue: format(synth.filterCutoff, suffix: " Hz")
+                            )
 
-                            ControlPanel(title: "FILTER", systemImage: "slider.horizontal.3") {
-                                ParameterSlider(
-                                    title: "Cutoff",
-                                    value: $synth.filterCutoff,
-                                    range: 20...20000,
-                                    displayValue: format(synth.filterCutoff, suffix: " Hz")
-                                )
+                            ParameterSlider(
+                                title: "Resonance",
+                                value: $synth.resonance,
+                                range: 0...10,
+                                displayValue: format(synth.resonance, suffix: " dB")
+                            )
 
-                                ParameterSlider(
-                                    title: "Resonance",
-                                    value: $synth.resonance,
-                                    range: 0...10,
-                                    displayValue: format(synth.resonance, suffix: " dB")
-                                )
-
-                                ParameterSlider(
-                                    title: "Env Mod",
-                                    value: $synth.envelopeAmount,
-                                    range: 0...1,
-                                    displayValue: percent(synth.envelopeAmount)
-                                )
-                            }
-
-                            ControlPanel(title: "ENVELOPE", systemImage: "point.topleft.down.curvedto.point.bottomright.up") {
-                                EnvelopeGrid(synth: synth)
-                            }
-
-                            KeyboardView(synth: synth)
-
-                            StepSequencer(
-                                selectedStep: $selectedStep,
-                                steps: steps,
-                                rootFrequency: rootFrequency,
-                                play: playStep
+                            ParameterSlider(
+                                title: "Env Mod",
+                                value: $synth.envelopeAmount,
+                                range: 0...1,
+                                displayValue: percent(synth.envelopeAmount)
                             )
                         }
-                        .padding(.horizontal, 18)
-                        .padding(.top, 20)
-                        .padding(.bottom, 28)
+
+                        ControlPanel(title: "ENVELOPE", systemImage: "point.topleft.down.curvedto.point.bottomright.up") {
+                            EnvelopeGrid(synth: synth)
+                        }
+
+                        KeyboardView(synth: synth)
+
+                        StepSequencer(
+                            selectedStep: $selectedStep,
+                            steps: steps,
+                            play: playStep
+                        )
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 18)
+                    .padding(.bottom, 26)
+                    .frame(maxWidth: 760)
+                    .frame(maxWidth: .infinity)
                 }
+            }
 
             AdMobBannerView()
                 .background(Color.black)
@@ -96,36 +96,34 @@ struct ContentView: View {
     }
 }
 
-private struct AcidBackdrop: View {
+private struct CosmicBackdrop<Content: View>: View {
+    @ViewBuilder let content: Content
+
     var body: some View {
         ZStack {
-            Image("AcidPanel")
+            Image("CosmicPanel")
                 .resizable()
                 .scaledToFill()
                 .ignoresSafeArea()
 
             LinearGradient(
                 colors: [
-                    Color.black.opacity(0.28),
-                    Color(red: 0.02, green: 0.03, blue: 0.04).opacity(0.88)
+                    Color.black.opacity(0.16),
+                    Color(red: 0.01, green: 0.02, blue: 0.03).opacity(0.72),
+                    Color.black.opacity(0.9)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
             )
             .ignoresSafeArea()
 
-            RadialGradient(
-                colors: [
-                    Color.cyan.opacity(0.14),
-                    Color.clear
-                ],
-                center: .topTrailing,
-                startRadius: 10,
-                endRadius: 360
-            )
-            .ignoresSafeArea()
+            Rectangle()
+                .fill(Color.black.opacity(0.22))
+                .ignoresSafeArea()
+
+            content
         }
-        .background(Color(red: 0.015, green: 0.018, blue: 0.02))
+        .background(Color(red: 0.01, green: 0.012, blue: 0.018))
     }
 }
 
@@ -133,30 +131,33 @@ private struct HeaderView: View {
     let frequency: Double
 
     var body: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("SYNTHMAKER")
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                    .foregroundColor(.amber)
-                    .tracking(3)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 14) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("SYNTHMAKER")
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .foregroundColor(.starAmber)
 
-                Text("ACID BASS UNIT")
-                    .font(.system(size: 34, weight: .black, design: .rounded))
-                    .foregroundColor(.panelText)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.74)
+                    Text("COSMIC ACID ENGINE")
+                        .font(.system(size: 30, weight: .black, design: .rounded))
+                        .foregroundColor(.panelText)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.72)
+                }
+
+                Spacer(minLength: 8)
+
+                StatusPill(text: "LIVE", color: .signalRed)
             }
 
-            Spacer(minLength: 12)
-
-            VStack(alignment: .trailing, spacing: 8) {
-                StatusPill(text: "LIVE", color: .signalRed)
-
-                Text(String(format: "%.1f Hz", frequency))
-                    .font(.system(size: 13, weight: .bold, design: .monospaced))
-                    .foregroundColor(.cyan)
+            HStack(spacing: 10) {
+                MiniMeter(title: "FREQ", value: String(format: "%.1f", frequency), suffix: "Hz", color: .cosmicCyan)
+                MiniMeter(title: "SYNC", value: "ON", suffix: "", color: .violetPulse)
+                MiniMeter(title: "DRIVE", value: "82", suffix: "%", color: .starAmber)
             }
         }
+        .padding(16)
+        .background(PanelBackground(prominence: 0.56))
     }
 }
 
@@ -165,11 +166,11 @@ private struct StatusPill: View {
     let color: Color
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 7) {
             Circle()
                 .fill(color)
                 .frame(width: 7, height: 7)
-                .shadow(color: color, radius: 6)
+                .shadow(color: color, radius: 7)
 
             Text(text)
                 .font(.system(size: 11, weight: .black, design: .monospaced))
@@ -177,11 +178,48 @@ private struct StatusPill: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .background(Color.black.opacity(0.46))
+        .background(Color.black.opacity(0.58))
         .clipShape(Capsule())
         .overlay(
             Capsule()
-                .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                .stroke(Color.white.opacity(0.16), lineWidth: 1)
+        )
+    }
+}
+
+private struct MiniMeter: View {
+    let title: String
+    let value: String
+    let suffix: String
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.system(size: 9, weight: .black, design: .monospaced))
+                .foregroundColor(.panelMuted)
+
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(value)
+                    .font(.system(size: 16, weight: .black, design: .monospaced))
+                    .foregroundColor(color)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.68)
+
+                if !suffix.isEmpty {
+                    Text(suffix)
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundColor(.panelMuted)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Color.black.opacity(0.38))
+        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .stroke(color.opacity(0.24), lineWidth: 1)
         )
     }
 }
@@ -192,17 +230,17 @@ private struct SignalScope: View {
     let resonance: Double
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 13) {
             HStack {
-                Label("SIGNAL", systemImage: "dot.radiowaves.left.and.right")
+                Label("SIGNAL SCOPE", systemImage: "dot.radiowaves.left.and.right")
                     .font(.system(size: 12, weight: .black, design: .monospaced))
-                    .foregroundColor(.amber)
+                    .foregroundColor(.starAmber)
 
                 Spacer()
 
                 Text(scopeLabel)
                     .font(.system(size: 12, weight: .bold, design: .monospaced))
-                    .foregroundColor(.cyan)
+                    .foregroundColor(.cosmicCyan)
             }
 
             GeometryReader { proxy in
@@ -211,25 +249,23 @@ private struct SignalScope: View {
 
                     ScopeWaveform(waveform: waveform, cutoff: cutoff, resonance: resonance)
                         .stroke(
-                            LinearGradient(colors: [.cyan, .amber], startPoint: .leading, endPoint: .trailing),
-                            style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round)
+                            LinearGradient(
+                                colors: [.cosmicCyan, .violetPulse, .starAmber],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            ),
+                            style: StrokeStyle(lineWidth: 3.2, lineCap: .round, lineJoin: .round)
                         )
-                        .shadow(color: .cyan.opacity(0.5), radius: 10)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 12)
+                        .shadow(color: .cosmicCyan.opacity(0.54), radius: 12)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 14)
                 }
                 .frame(width: proxy.size.width, height: proxy.size.height)
             }
-            .frame(height: 128)
+            .frame(height: 138)
         }
         .padding(16)
-        .background(.ultraThinMaterial)
-        .background(Color.black.opacity(0.34))
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.cyan.opacity(0.22), lineWidth: 1)
-        )
+        .background(PanelBackground(prominence: 0.5))
     }
 
     private var scopeLabel: String {
@@ -240,7 +276,14 @@ private struct SignalScope: View {
 private struct ScopeGrid: View {
     var body: some View {
         ZStack {
-            Color.black.opacity(0.58)
+            LinearGradient(
+                colors: [
+                    Color.black.opacity(0.74),
+                    Color(red: 0.02, green: 0.08, blue: 0.1).opacity(0.7)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
 
             VStack(spacing: 0) {
                 ForEach(0..<5, id: \.self) { _ in
@@ -260,7 +303,11 @@ private struct ScopeGrid: View {
                 }
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .stroke(Color.cosmicCyan.opacity(0.2), lineWidth: 1)
+        )
     }
 }
 
@@ -271,9 +318,9 @@ private struct ScopeWaveform: Shape {
 
     func path(in rect: CGRect) -> Path {
         var path = Path()
-        let sampleCount = 96
-        let amplitude = rect.height * CGFloat(0.22 + min(resonance, 10) * 0.018)
-        let cycles = 2.0 + min(cutoff / 7000, 2.2)
+        let sampleCount = 112
+        let amplitude = rect.height * CGFloat(0.2 + min(resonance, 10) * 0.018)
+        let cycles = 2.1 + min(cutoff / 7200, 2.4)
         let midY = rect.midY
 
         for sample in 0...sampleCount {
@@ -313,19 +360,20 @@ private struct ControlPanel<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 15) {
             HStack(spacing: 9) {
                 Image(systemName: systemImage)
                     .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(.cyan)
-                    .frame(width: 24, height: 24)
-                    .background(Color.cyan.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    .foregroundColor(.cosmicCyan)
+                    .frame(width: 25, height: 25)
+                    .background(Color.cosmicCyan.opacity(0.13))
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
 
                 Text(title)
                     .font(.system(size: 12, weight: .black, design: .monospaced))
-                    .foregroundColor(.amber)
-                    .tracking(2)
+                    .foregroundColor(.starAmber)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.76)
 
                 Spacer()
             }
@@ -333,13 +381,36 @@ private struct ControlPanel<Content: View>: View {
             content
         }
         .padding(16)
-        .background(Color.black.opacity(0.48))
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.white.opacity(0.12), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.24), radius: 18, x: 0, y: 12)
+        .background(PanelBackground(prominence: 0.48))
+    }
+}
+
+private struct PanelBackground: View {
+    let prominence: Double
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(.ultraThinMaterial)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.black.opacity(prominence))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.16),
+                                Color.cosmicCyan.opacity(0.2),
+                                Color.violetPulse.opacity(0.12)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+            )
+            .shadow(color: Color.black.opacity(0.32), radius: 18, x: 0, y: 12)
     }
 }
 
@@ -361,10 +432,12 @@ private struct ParameterSlider: View {
                 Text(displayValue)
                     .font(.system(size: 12, weight: .bold, design: .monospaced))
                     .foregroundColor(.panelText)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
             }
 
             Slider(value: $value, in: range)
-                .tint(.amber)
+                .tint(.starAmber)
         }
     }
 }
@@ -384,10 +457,14 @@ private struct WaveformPicker: View {
                         .foregroundColor(Int(selection.rounded()) == index ? .black : .panelText)
                         .frame(maxWidth: .infinity)
                         .frame(height: 38)
-                        .background(Int(selection.rounded()) == index ? Color.amber : Color.white.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .background(
+                            Int(selection.rounded()) == index
+                            ? Color.starAmber
+                            : Color.white.opacity(0.08)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
                                 .stroke(Color.white.opacity(0.13), lineWidth: 1)
                         )
                 }
@@ -448,26 +525,27 @@ private struct KeyboardView: View {
 
     var body: some View {
         ControlPanel(title: "KEYBOARD", systemImage: "pianokeys") {
-            HStack(spacing: 7) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 48, maximum: 88), spacing: 7)], spacing: 7) {
                 ForEach(notes) { note in
                     Button {
                         synth.playNote(frequency: note.frequency)
                     } label: {
                         VStack(spacing: 4) {
                             Text(note.name)
-                                .font(.system(size: 16, weight: .black, design: .rounded))
+                                .font(.system(size: 17, weight: .black, design: .rounded))
+
                             Text("BASS")
                                 .font(.system(size: 8, weight: .bold, design: .monospaced))
                                 .foregroundColor(.panelMuted)
                         }
                         .foregroundColor(.panelText)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 64)
-                        .background(note.name == "C" ? Color.cyan.opacity(0.22) : Color.white.opacity(0.1))
+                        .frame(height: 62)
+                        .background(note.name == "C" ? Color.cosmicCyan.opacity(0.24) : Color.white.opacity(0.1))
                         .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                         .overlay(
                             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                                .stroke(Color.white.opacity(0.15), lineWidth: 1)
                         )
                     }
                     .buttonStyle(.plain)
@@ -480,32 +558,31 @@ private struct KeyboardView: View {
 private struct StepSequencer: View {
     @Binding var selectedStep: Int
     let steps: [Int]
-    let rootFrequency: Double
     let play: (Int) -> Void
 
     var body: some View {
         ControlPanel(title: "PATTERN", systemImage: "square.grid.3x3.fill") {
-            HStack(spacing: 8) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 58, maximum: 88), spacing: 8)], spacing: 8) {
                 ForEach(steps.indices, id: \.self) { index in
                     Button {
                         play(index)
                     } label: {
                         VStack(spacing: 6) {
                             Capsule()
-                                .fill(selectedStep == index ? Color.signalRed : Color.white.opacity(0.16))
-                                .frame(width: 16, height: 4)
+                                .fill(selectedStep == index ? Color.signalRed : Color.white.opacity(0.18))
+                                .frame(width: 18, height: 4)
 
                             Text("\(index + 1)")
-                                .font(.system(size: 12, weight: .black, design: .monospaced))
+                                .font(.system(size: 13, weight: .black, design: .monospaced))
 
                             Text(noteName(for: steps[index]))
                                 .font(.system(size: 9, weight: .bold, design: .monospaced))
-                                .foregroundColor(.panelMuted)
+                                .foregroundColor(selectedStep == index ? .black.opacity(0.64) : .panelMuted)
                         }
                         .foregroundColor(selectedStep == index ? .black : .panelText)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 68)
-                        .background(selectedStep == index ? Color.amber : Color.white.opacity(0.08))
+                        .frame(height: 66)
+                        .background(selectedStep == index ? Color.starAmber : Color.white.opacity(0.08))
                         .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                         .overlay(
                             RoundedRectangle(cornerRadius: 7, style: .continuous)
@@ -531,10 +608,12 @@ private struct Note: Identifiable {
 }
 
 private extension Color {
-    static let amber = Color(red: 1.0, green: 0.72, blue: 0.22)
-    static let signalRed = Color(red: 1.0, green: 0.2, blue: 0.12)
-    static let panelText = Color(red: 0.94, green: 0.96, blue: 0.92)
-    static let panelMuted = Color(red: 0.58, green: 0.64, blue: 0.62)
+    static let cosmicCyan = Color(red: 0.22, green: 0.88, blue: 1.0)
+    static let starAmber = Color(red: 1.0, green: 0.72, blue: 0.22)
+    static let violetPulse = Color(red: 0.74, green: 0.36, blue: 1.0)
+    static let signalRed = Color(red: 1.0, green: 0.18, blue: 0.12)
+    static let panelText = Color(red: 0.95, green: 0.97, blue: 0.94)
+    static let panelMuted = Color(red: 0.62, green: 0.68, blue: 0.68)
 }
 
 #Preview {
