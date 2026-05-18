@@ -56,7 +56,6 @@ final class SynthEngine: NSObject, ObservableObject {
 
     override init() {
         super.init()
-        setupAudioEngine()
     }
 
     private func setupAudioEngine() {

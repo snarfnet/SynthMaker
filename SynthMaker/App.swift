@@ -1,15 +1,17 @@
 import SwiftUI
-import GoogleMobileAds
+import UIKit
 
 @main
 struct SynthMakerApp: App {
-    init() {
-        MobileAds.shared.start()
-    }
+    @StateObject private var ads = AdMobController()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(ads)
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                    ads.startIfNeeded()
+                }
         }
     }
 }

@@ -2,18 +2,23 @@ import SwiftUI
 import GoogleMobileAds
 
 struct AdMobBannerView: View {
+    @EnvironmentObject private var ads: AdMobController
+
     private let adUnitID = "ca-app-pub-9404799280370656/2276411215"
 
     var body: some View {
         GeometryReader { proxy in
             let width = max(proxy.size.width, 320)
             let adSize = largeAnchoredAdaptiveBanner(width: width)
-            BannerContainer(
-                adUnitID: adUnitID,
-                adSize: adSize
-            )
-            .frame(width: width, height: adSize.size.height)
-            .frame(maxWidth: .infinity)
+
+            if ads.isReady {
+                BannerContainer(
+                    adUnitID: adUnitID,
+                    adSize: adSize
+                )
+                .frame(width: width, height: adSize.size.height)
+                .frame(maxWidth: .infinity)
+            }
         }
         .frame(height: 96)
     }

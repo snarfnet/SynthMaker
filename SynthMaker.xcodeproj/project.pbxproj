@@ -13,6 +13,7 @@
 		A10000000000000000000004 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* Assets.xcassets */; };
 		A10000000000000000000005 /* AdMobBannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000015 /* AdMobBannerView.swift */; };
 		A10000000000000000000006 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000091 /* GoogleMobileAds */; };
+		A10000000000000000000007 /* AdMobController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000016 /* AdMobController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -22,6 +23,7 @@
 		A10000000000000000000013 /* SynthEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SynthEngine.swift; sourceTree = "<group>"; };
 		A10000000000000000000014 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A10000000000000000000015 /* AdMobBannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdMobBannerView.swift; sourceTree = "<group>"; };
+		A10000000000000000000016 /* AdMobController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdMobController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -51,6 +53,7 @@
 				A10000000000000000000012 /* ContentView.swift */,
 				A10000000000000000000013 /* SynthEngine.swift */,
 				A10000000000000000000015 /* AdMobBannerView.swift */,
+				A10000000000000000000016 /* AdMobController.swift */,
 				A10000000000000000000014 /* Assets.xcassets */,
 			);
 			path = SynthMaker;
@@ -143,6 +146,7 @@
 				A10000000000000000000002 /* ContentView.swift in Sources */,
 				A10000000000000000000003 /* SynthEngine.swift in Sources */,
 				A10000000000000000000005 /* AdMobBannerView.swift in Sources */,
+				A10000000000000000000007 /* AdMobController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -276,6 +280,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_GADApplicationIdentifier = "ca-app-pub-9404799280370656~9256981443";
+				INFOPLIST_KEY_NSUserTrackingUsageDescription = "This identifier is used to show more relevant ads and measure ad performance.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -301,6 +306,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_GADApplicationIdentifier = "ca-app-pub-9404799280370656~9256981443";
+				INFOPLIST_KEY_NSUserTrackingUsageDescription = "This identifier is used to show more relevant ads and measure ad performance.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
