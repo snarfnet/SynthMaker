@@ -1,44 +1,26 @@
 import AppTrackingTransparency
+import Combine
 import Foundation
-import GoogleMobileAds
 
 final class AdMobController: ObservableObject {
-    @Published private(set) var isReady = false
+    @Published private(set) var isReady = true
 
-    private var didStart = false
+    private var didRequestTracking = false
 
     func startIfNeeded() {
         DispatchQueue.main.async { [weak self] in
-            self?.startOnMainThread()
+            self?.requestTrackingIfNeeded()
         }
     }
 
-    private func startOnMainThread() {
-        guard !didStart else { return }
-        didStart = true
+    private func requestTrackingIfNeeded() {
+        guard !didRequestTracking else { return }
+        didRequestTracking = true
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-            self?.requestTrackingThenStartAds()
-        }
-    }
+        guard #available(iOS 14, *) else { return }
 
-    private func requestTrackingThenStartAds() {
-        if #available(iOS 14, *) {
-            ATTrackingManager.requestTrackingAuthorization { [weak self] _ in
-                self?.startAdsOnMainThread()
-            }
-        } else {
-            startAdsOnMainThread()
-        }
-    }
-
-    private func startAdsOnMainThread() {
-        DispatchQueue.main.async { [weak self] in
-            MobileAds.shared.start { _ in
-                DispatchQueue.main.async {
-                    self?.isReady = true
-                }
-            }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            ATTrackingManager.requestTrackingAuthorization { _ in }
         }
     }
 }

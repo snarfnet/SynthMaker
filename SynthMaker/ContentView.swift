@@ -607,7 +607,7 @@ private struct Note: Identifiable {
     let frequency: Double
 }
 
-private extension Color {
+extension Color {
     static let cosmicCyan = Color(red: 0.22, green: 0.88, blue: 1.0)
     static let starAmber = Color(red: 1.0, green: 0.72, blue: 0.22)
     static let violetPulse = Color(red: 0.74, green: 0.36, blue: 1.0)
