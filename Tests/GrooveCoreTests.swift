@@ -3,7 +3,7 @@ import Foundation
 @main
 struct GrooveCoreTests {
     static func main() throws {
-        for index in 0...2 {
+        for index in 0...5 {
             let patch = GroovePatch.preset(index)
             precondition(patch.isValid)
             let restored = try JSONDecoder().decode(GroovePatch.self, from: JSONEncoder().encode(patch))
@@ -112,6 +112,68 @@ struct GrooveCoreTests {
             }
         }
         precondition(energyByBar[0] > 1 && energyByBar[1] < 0.00001 && energyByBar[2] > 1)
+        // Old slots have no tone payload: retain the original acid instrument.
+        var legacy = try JSONSerialization.jsonObject(with: JSONEncoder().encode(GroovePatch())) as! [String: Any]
+        legacy.removeValue(forKey: "tone")
+        let oldSave = try JSONDecoder().decode(GroovePatch.self, from: JSONSerialization.data(withJSONObject: legacy))
+        precondition(oldSave.tone == ToneSettings() && oldSave.isValid)
+        var modelSignatures: [Double] = []
+        for model in 1...4 {
+            var patch = GroovePatch()
+            patch.applyTone(model)
+            patch.drums = false
+            patch.steps = (0..<16).map { GrooveStep(note: 7, enabled: $0 == 0) }
+            precondition(patch.isValid)
+            let decoded = try JSONDecoder().decode(GroovePatch.self, from: JSONEncoder().encode(patch))
+            precondition(decoded == patch)
+            var dsp = GrooveDSP(sampleRate: 44_100)
+            var rendered: [Float] = []
+            var energy = 0.0
+            for frame in 0..<88_200 {
+                let sample = dsp.nextSample(patch)
+                precondition(sample.isFinite && abs(sample) <= 0.85)
+                if frame < 4000 { rendered.append(sample) }
+                energy += Double(sample * sample)
+            }
+            precondition(energy > 1, "Every instrument must be audible")
+            modelSignatures.append(energy)
+            dsp.reset()
+            for expected in rendered {
+                precondition(dsp.nextSample(patch) == expected, "Restart must clear echo and oscillator state")
+            }
+            for i in 0..<16 { patch.steps[i].enabled = false }
+            dsp.reset()
+            for _ in 0..<44_100 { precondition(dsp.nextSample(patch) == 0, "No ghost notes before first trigger") }
+            // Max-register stress at both supported test rates.
+            patch.steps[0].enabled = true; patch.steps[0].note = 24
+            patch.tone.octave = 3; patch.tone.color = 1; patch.tone.bloom = 1
+            patch.tone.motion = 1; patch.tone.space = 0.6; patch.tone.tail = 3
+            patch.resonance = 10; patch.drive = 1
+            for rate in [44_100.0, 48_000.0] {
+                var extremeDSP = GrooveDSP(sampleRate: rate)
+                for _ in 0..<48_000 {
+                    let sample = extremeDSP.nextSample(patch)
+                    precondition(sample.isFinite && abs(sample) <= 0.85)
+                }
+            }
+        }
+        precondition(Set(modelSignatures).count == 4, "Instrument models must produce different signals")
+        var luma = GroovePatch.preset(3)
+        luma.drums = false
+        for control in 0...2 {
+            var changed = luma
+            if control == 0 { changed.tone.color = 0.95 }
+            if control == 1 { changed.tone.bloom = 0.05 }
+            if control == 2 { changed.tone.motion = 0.95 }
+            var baseline = GrooveDSP(sampleRate: 44_100)
+            var altered = GrooveDSP(sampleRate: 44_100)
+            var delta = 0.0
+            for _ in 0..<44_100 {
+                delta += abs(Double(baseline.nextSample(luma) - altered.nextSample(changed)))
+            }
+            precondition(delta > 1, "Every LUMA-7 macro must change the sound")
+        }
+        print("PASS: legacy saves, modeled instruments, LUMA-7 macros, tails/reset, silence and high-register stability")
         print("PASS: Euclidean spacing, lane isolation, scale mutation, probability, cutoff locks, loop conditions")
         print("PASS: presets, persistence, validation, sample timing, swing, silence, output bounds, deterministic rendering")
     }

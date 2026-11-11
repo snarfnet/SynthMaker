@@ -32,7 +32,7 @@ struct ContentView: View {
                         Text(synth.isPlaying ? "PLAYING" : "READY")
                             .font(.caption.monospaced()).foregroundColor(cyan)
                     }
-                    Text("Press Play. Shape the bass. Build your groove.")
+                    Text("Press Play. Shape your sound. Build your groove.")
                         .font(.subheadline).foregroundColor(.secondary)
                     transport
                     pattern
@@ -121,7 +121,7 @@ struct ContentView: View {
             }
             Divider()
             Text("STEP \(selectedStep + 1)").font(.caption.bold()).foregroundColor(cyan)
-            Toggle("Bass note", isOn: $synth.patch.steps[selectedStep].enabled)
+            Toggle("Instrument note", isOn: $synth.patch.steps[selectedStep].enabled)
             Stepper("Note: \(noteName(synth.patch.steps[selectedStep].note))", value: $synth.patch.steps[selectedStep].note, in: -12...24)
             HStack {
                 Toggle("Accent", isOn: $synth.patch.steps[selectedStep].accent)
@@ -146,7 +146,7 @@ struct ContentView: View {
                     set: { synth.patch.steps[selectedStep].cutoffLock = $0 }
                 ), range: 40...12000, text: "\(Int(synth.patch.steps[selectedStep].cutoffLock ?? synth.patch.cutoff)) Hz")
             }
-            Text("Probability and loop conditions affect the bass only. Conditional notes start on loop 1. A cutoff lock overrides the main cutoff for this step.")
+            Text("Probability and loop conditions affect the instrument only. Conditional notes start on loop 1. A cutoff lock overrides the main cutoff for this step.")
                 .font(.caption).foregroundColor(.secondary)
             Text("Accent adds emphasis. Slide carries this note into the next. K = kick, H = hi-hat.")
                 .font(.caption).foregroundColor(.secondary)
@@ -159,7 +159,7 @@ struct ContentView: View {
             heading("EVOLUTION", detail: "Generate rhythms and variations")
             Text("Euclidean rhythm").font(.headline)
             Picker("Rhythm lane", selection: $lane) {
-                Text("Bass").tag(0); Text("Kick").tag(1); Text("Hi-hat").tag(2)
+                Text("Melody").tag(0); Text("Kick").tag(1); Text("Hi-hat").tag(2)
             }.pickerStyle(.segmented)
             Stepper("Hits: \(pulses) / 16", value: $pulses, in: 0...16)
             Stepper("Rotation: \(rotation)", value: $rotation, in: 0...15)
@@ -169,13 +169,13 @@ struct ContentView: View {
             Text("Space hits evenly across 16 steps. Try 5 bass notes against a 4-hit kick.")
                 .font(.caption).foregroundColor(.secondary)
             Divider()
-            Button("Mutate bass · A minor pentatonic") { synth.mutate() }
+            Button("Mutate melody · A minor pentatonic") { synth.mutate() }
                 .buttonStyle(.bordered).controlSize(.large)
             Text("Changes some notes, accents and slides while keeping the rhythm and drums. Changes apply during playback.")
                 .font(.caption).foregroundColor(.secondary)
-            Button("Undo last generation / pattern load") { synth.undoGeneration() }
+            Button("Undo last generation / preset") { synth.undoGeneration() }
                 .disabled(!synth.canUndo)
-            Text("Undo restores the full pattern from before the last generation or load, including any edits made since then.")
+            Text("Undo restores the full pattern from before the last generation, instrument choice or load, including any edits made since then.")
                 .font(.caption).foregroundColor(.secondary)
         }
         .padding(16).background(panel)
@@ -183,10 +183,44 @@ struct ContentView: View {
 
     private var sound: some View {
         VStack(alignment: .leading, spacing: 16) {
-            heading("BASS ENGINE", detail: "Sound controls")
+            heading("INSTRUMENT", detail: "Choose a voice, then make it yours")
+            Picker("Instrument", selection: Binding(
+                get: { synth.patch.tone.model }, set: { synth.selectTone($0) }
+            )) {
+                Text("Acid · original bass").tag(0)
+                Text("Warm Analog · detuned oscillators").tag(1)
+                Text("Glass Bell · FM synthesis").tag(2)
+                Text("Soft Keys · FM electric piano").tag(3)
+                Text("LUMA-7 · original spectral instrument").tag(4)
+            }.pickerStyle(.menu)
+            Text("Choosing an instrument sets its tone controls and octave, preserving your rhythm. Undo restores the previous patch.")
+                .font(.caption).foregroundColor(.secondary)
+            Stepper("Octave: +\(synth.patch.tone.octave)", value: $synth.patch.tone.octave, in: 0...3)
+            if synth.patch.tone.model != 0 {
+                if synth.patch.tone.model == 4 {
+                    Text("LUMA-7").font(.system(size: 28, weight: .light, design: .rounded)).foregroundColor(cyan)
+                    Text("Seven partials. A slow bloom. A little instability. Our original monophonic instrument — from soft light to struck glass.")
+                        .font(.caption).foregroundColor(.secondary)
+                }
+                parameter("Color", value: $synth.patch.tone.color, range: 0...1, text: "\(Int(synth.patch.tone.color * 100))%")
+                if synth.patch.tone.model != 1 {
+                    parameter("Bloom", value: $synth.patch.tone.bloom, range: 0...1, text: "\(Int(synth.patch.tone.bloom * 100))%")
+                }
+                if synth.patch.tone.model == 1 || synth.patch.tone.model == 4 {
+                    parameter("Motion", value: $synth.patch.tone.motion, range: 0...1, text: "\(Int(synth.patch.tone.motion * 100))%")
+                }
+                parameter("Tone tail", value: $synth.patch.tone.tail, range: 0.1...3, text: String(format: "%.2f s", synth.patch.tone.tail))
+                Text("These are synthesis models, not exact replicas of named hardware. One melodic voice; new notes retune the current voice.")
+                    .font(.caption).foregroundColor(.secondary)
+            }
+            parameter("Tape echo", value: $synth.patch.tone.space, range: 0...0.6, text: "\(Int(synth.patch.tone.space * 100))%")
+            Text("Dotted-eighth echoes follow the tempo. Warm, damped repeats affect the instrument only.")
+                .font(.caption).foregroundColor(.secondary)
+            if synth.patch.tone.model == 0 {
             Picker("Waveform", selection: $synth.patch.waveform) {
                 Text("Saw").tag(0); Text("Square").tag(1); Text("Triangle").tag(2); Text("Sine").tag(3)
             }.pickerStyle(.segmented)
+            }
             parameter("Cutoff", value: $synth.patch.cutoff, range: 40...12000, text: "\(Int(synth.patch.cutoff)) Hz")
             parameter("Resonance", value: $synth.patch.resonance, range: 0...10, text: String(format: "%.1f", synth.patch.resonance))
             parameter("Filter envelope", value: $synth.patch.envMod, range: 0...1, text: "\(Int(synth.patch.envMod * 100))%")
@@ -203,6 +237,9 @@ struct ContentView: View {
                 Button("Warehouse · 130 BPM") { confirmPreset = 0 }
                 Button("Acid Pressure · 138 BPM") { confirmPreset = 1 }
                 Button("Afterhours · 122 BPM") { confirmPreset = 2 }
+                Button("LUMA-7 · First Light") { confirmPreset = 3 }
+                Button("Glass Bell · Starlight") { confirmPreset = 4 }
+                Button("Soft Keys · Night Transit") { confirmPreset = 5 }
             }
             Picker("Save slot", selection: $slot) {
                 ForEach(1...4, id: \.self) { Text("Slot \($0)").tag($0) }
@@ -240,7 +277,7 @@ struct ContentView: View {
     }
 
     private func noteName(_ semitone: Int) -> String {
-        let midi = 33 + semitone
+        let midi = 33 + semitone + 12 * synth.patch.tone.octave
         return "\(noteNames[(semitone % 12 + 12) % 12])\(midi / 12 - 1)"
     }
 }

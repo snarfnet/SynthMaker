@@ -12,7 +12,26 @@ struct GrooveStep: Codable, Equatable {
     var cutoffLock: Double?
 }
 
+struct ToneSettings: Codable, Equatable {
+    // 0: Acid, 1: Warm analog, 2: FM glass, 3: FM keys, 4: original LUMA-7.
+    var model = 0
+    var octave = 0
+    var color = 0.4
+    var bloom = 0.5
+    var motion = 0.25
+    var tail = 0.8
+    var space = 0.0
+
+    var isValid: Bool {
+        (0...4).contains(model) && (0...3).contains(octave)
+            && (0...1).contains(color) && (0...1).contains(bloom)
+            && (0...1).contains(motion) && (0.1...3).contains(tail)
+            && (0...0.6).contains(space)
+    }
+}
+
 struct GroovePatch: Codable, Equatable {
+    var tone = ToneSettings()
     var tempo = 130.0
     var swing = 0.0
     var cutoff = 1100.0
@@ -29,8 +48,43 @@ struct GroovePatch: Codable, Equatable {
                    hat: index % 2 == 0)
     }
 
+    init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case tone, tempo, swing, cutoff, resonance, envMod, decay, drive, waveform, drums, steps
+    }
+
+    init(from decoder: Decoder) throws {
+        self.init()
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        tone = try c.decodeIfPresent(ToneSettings.self, forKey: .tone) ?? ToneSettings()
+        tempo = try c.decode(Double.self, forKey: .tempo)
+        swing = try c.decode(Double.self, forKey: .swing)
+        cutoff = try c.decode(Double.self, forKey: .cutoff)
+        resonance = try c.decode(Double.self, forKey: .resonance)
+        envMod = try c.decode(Double.self, forKey: .envMod)
+        decay = try c.decode(Double.self, forKey: .decay)
+        drive = try c.decode(Double.self, forKey: .drive)
+        waveform = try c.decode(Int.self, forKey: .waveform)
+        drums = try c.decode(Bool.self, forKey: .drums)
+        steps = try c.decode([GrooveStep].self, forKey: .steps)
+    }
+
+    mutating func applyTone(_ model: Int) {
+        tone = ToneSettings()
+        tone.model = model
+        tone.octave = model == 0 ? 0 : 2
+        tone.space = model == 0 ? 0 : 0.24
+        tone.tail = model == 1 ? 0.5 : 1.2
+        tone.color = model == 3 ? 0.25 : 0.45
+        cutoff = model == 0 ? 1100 : 6500
+        resonance = model == 0 ? 4 : 0.8
+        envMod = model == 0 ? 0.65 : 0.15
+        drive = model == 0 ? 0.3 : 0.04
+    }
+
     var isValid: Bool {
-        steps.count == 16 && (60...180).contains(tempo) && (0...0.45).contains(swing)
+        tone.isValid && steps.count == 16 && (60...180).contains(tempo) && (0...0.45).contains(swing)
             && (40...12000).contains(cutoff) && (0...10).contains(resonance)
             && (0...1).contains(envMod) && (0.03...1).contains(decay)
             && (0...1).contains(drive) && (0...3).contains(waveform)
@@ -89,6 +143,15 @@ struct GroovePatch: Codable, Equatable {
                            accent: i % 4 == 0, kick: i % 4 == 0, hat: i % 4 == 2)
             }
         }
+        if index >= 3 {
+            patch.applyTone(index == 3 ? 4 : (index == 4 ? 2 : 3))
+            patch.tempo = 118
+            patch.steps = (0..<16).map { i in
+                GrooveStep(note: [0, 7, 10, 3][i / 4], enabled: i % 4 == 0,
+                           accent: i == 0, kick: i % 4 == 0, hat: i % 4 == 2)
+            }
+            if index == 3 { patch.tone.bloom = 0.8; patch.tone.motion = 0.35 }
+        }
         return patch
     }
 }
@@ -102,6 +165,15 @@ struct GrooveDSP {
     private var duration = 1.0
     private var elapsed = 0.0
     private var phase = 0.0
+    private var secondPhase = 0.0
+    private var lumaPhases = SevenPhases()
+    private var hasToneVoice = false
+    private var modulatorPhase = 0.0
+    private var motionPhase = 0.0
+    private var voiceAge = 100.0
+    private var voiceAccent = false
+    private var toneEnvelope = 0.0
+    private let echo: GrooveEcho
     private var frequency = 55.0
     private var targetFrequency = 55.0
     private var envelope = 0.0
@@ -120,7 +192,21 @@ struct GrooveDSP {
     private var lockedCutoff: Double?
     private var noiseState: UInt32 = 0x12345678
 
-    init(sampleRate: Double) { self.sampleRate = sampleRate }
+    init(sampleRate: Double) {
+        self.sampleRate = sampleRate
+        self.echo = GrooveEcho(sampleRate: sampleRate)
+    }
+
+    private init(sampleRate: Double, echo: GrooveEcho) {
+        self.sampleRate = sampleRate
+        self.echo = echo
+    }
+
+    mutating func reset() {
+        // Reuse the preallocated delay memory when transport restarts.
+        echo.reset()
+        self = GrooveDSP(sampleRate: sampleRate, echo: echo)
+    }
 
     mutating func nextSample(_ patch: GroovePatch) -> Float {
         if remaining <= 0 {
@@ -139,8 +225,15 @@ struct GrooveDSP {
             filterTick = 0
             slide = step.slide
             accent = step.accent
-            targetFrequency = 55 * pow(2, Double(step.note) / 12)
-            if !previousSlide { frequency = targetFrequency }
+            if active || patch.tone.model == 0 {
+                targetFrequency = 55 * pow(2, Double(step.note) / 12 + Double(patch.tone.octave))
+                if !previousSlide { frequency = targetFrequency }
+            }
+            if active && !previousSlide {
+                hasToneVoice = true
+                voiceAge = 0
+                voiceAccent = step.accent
+            }
             if active && !previousSlide { envelope = 0 }
             if patch.drums && step.kick { kickAge = 0; kickPhase = 0 }
             if patch.drums && step.hat { hatAge = 0 }
@@ -150,7 +243,7 @@ struct GrooveDSP {
         envelope += (targetLevel - envelope) * (gate ? 0.012 : 0.003)
         frequency += (targetFrequency - frequency) * 0.002
         let dt = min(0.45, frequency / sampleRate)
-        let osc: Double
+        var osc: Double
         switch patch.waveform {
         case 1:
             let shifted = (phase + 0.5).truncatingRemainder(dividingBy: 1)
@@ -159,8 +252,59 @@ struct GrooveDSP {
         case 3: osc = sin(2 * .pi * phase)
         default: osc = 2 * phase - 1 - blep(phase, dt)
         }
+        var level = envelope
+        if patch.tone.model != 0 {
+            let t = patch.tone
+            motionPhase += (0.12 + t.motion * 0.9) / sampleRate
+            motionPhase -= floor(motionPhase)
+            let drift = sin(2 * .pi * motionPhase)
+            secondPhase += dt * pow(2, (3 + t.motion * 9) / 1200)
+            secondPhase -= floor(secondPhase)
+            let ratio = t.model == 2 ? 2.41421356237 : 1.0
+            modulatorPhase += dt * ratio
+            modulatorPhase -= floor(modulatorPhase)
+            let amplitude = hasToneVoice ? (1 - exp(-voiceAge * (t.model == 1 ? 35 : 600)))
+                * exp(-voiceAge / t.tail) : 0
+            switch t.model {
+            case 1:
+                let sawA = 2 * phase - 1 - blep(phase, dt)
+                let secondDT = dt * pow(2, (3 + t.motion * 9) / 1200)
+                let sawB = 2 * secondPhase - 1 - blep(secondPhase, secondDT)
+                osc = (sawA + sawB) * (0.18 + t.color * 0.22)
+                    + sin(2 * .pi * phase) * (0.64 - t.color * 0.44)
+            case 2:
+                let index = (0.2 + t.color * 2.4) * exp(-voiceAge / (0.08 + t.bloom * 1.4))
+                osc = sin(2 * .pi * phase + sin(2 * .pi * modulatorPhase) * index)
+            case 3:
+                let index = (0.4 + t.color * 1.7) * exp(-voiceAge / (0.06 + t.bloom * 0.4))
+                osc = 0.85 * sin(2 * .pi * phase + index * sin(4 * .pi * modulatorPhase))
+                    + 0.15 * sin(6 * .pi * phase) * exp(-voiceAge * 12)
+            default:
+                // LUMA-7: seven independent-ratio partials with a delayed spectral bloom.
+                // Each partial owns its phase so Color changes preserve phase continuity.
+                let opening = (1 - exp(-voiceAge / (0.025 + t.bloom * 0.45)))
+                    * exp(-voiceAge / (0.3 + t.tail))
+                var spectrum = 0.0
+                var normalization = 0.0
+                for partial in 1...7 {
+                    let h = Double(partial)
+                    let stretch = h * sqrt(1 + t.color * 0.006 * (h * h - 1))
+                    let brightness = partial == 1 ? 1 : (0.12 + opening * t.bloom * 1.8)
+                    let weight = brightness / pow(h, 1.5 - t.color * 0.45)
+                    let safeWeight = frequency * stretch < sampleRate * 0.4 ? weight : 0
+                    let partialPhase = lumaPhases.advance(partial - 1, by: dt * stretch * (1 + drift * t.motion * 0.0015))
+                    spectrum += sin(2 * .pi * partialPhase
+                        + drift * t.motion * h * 0.12) * safeWeight
+                    normalization += weight
+                }
+                osc = spectrum / max(1, normalization)
+            }
+            toneEnvelope += (amplitude - toneEnvelope) * 0.015
+            level = toneEnvelope
+        }
         phase += dt
         phase -= floor(phase)
+        voiceAge = min(100, voiceAge + 1 / sampleRate)
         // A resonant TPT state-variable filter. Env Mod now moves the cutoff.
         if filterTick == 0 {
             let modulation = patch.envMod * 5000 * exp(-elapsed / sampleRate / patch.decay) * (accent ? 1.35 : 1)
@@ -169,12 +313,14 @@ struct GrooveDSP {
         }
         filterTick = (filterTick + 1) % 32
         let k = 1 / (0.7 + patch.resonance * 0.7)
-        let input = osc * envelope * (accent ? 0.32 : 0.23)
+        let input = osc * level * (patch.tone.model == 0 ? (accent ? 0.32 : 0.23) : (voiceAccent ? 0.65 : 0.52))
         let v1 = (band + g * (input - low)) / (1 + g * (g + k))
         let v2 = low + g * v1
         band = 2 * v1 - band
         low = 2 * v2 - low
-        var output = tanh(v2 * (1 + patch.drive * 7)) * 0.5
+        let dry = tanh(v2 * (1 + patch.drive * 7)) * 0.5
+        let echoSample = echo.process(dry, tempo: patch.tempo)
+        var output = dry + echoSample * patch.tone.space
         if patch.drums {
             let kickFrequency = 48 + 110 * exp(-kickAge * 35)
             kickPhase += kickFrequency / sampleRate
@@ -194,5 +340,65 @@ struct GrooveDSP {
         if t < dt { let x = t / dt; return x + x - x * x - 1 }
         if t > 1 - dt { let x = (t - 1) / dt; return x * x + x + x + 1 }
         return 0
+    }
+}
+
+// A damped, softly saturated dotted-eighth echo. This is not a convolution reverb.
+// Storage is allocated once; reset invalidates history without clearing/allocating in render.
+private final class GrooveEcho {
+    private let sampleRate: Double
+    private var memory: [Double]
+    private var index = 0
+    private var valid = 0
+    private var delayed = 0.0
+    private var filtered = 0.0
+
+    init(sampleRate: Double) {
+        self.sampleRate = sampleRate
+        memory = Array(repeating: 0, count: Int(sampleRate * 2) + 2)
+    }
+
+    func reset() {
+        index = 0; valid = 0; delayed = 0; filtered = 0
+    }
+
+    func process(_ input: Double, tempo: Double) -> Double {
+        let target = sampleRate * 60 / tempo * 0.75
+        delayed = delayed == 0 ? target : delayed + (target - delayed) * 0.0002
+        var position = Double(index) - delayed
+        if position < 0 { position += Double(memory.count) }
+        let lower = Int(position)
+        let upper = (lower + 1) % memory.count
+        let fraction = position - Double(lower)
+        let tap = valid > Int(ceil(delayed))
+            ? memory[lower] * (1 - fraction) + memory[upper] * fraction : 0
+        filtered += (tap - filtered) * 0.18
+        memory[index] = tanh(input + filtered * 0.42)
+        index = (index + 1) % memory.count
+        valid = min(memory.count, valid + 1)
+        return filtered
+    }
+}
+
+// Value storage avoids allocating oscillator arrays on transport reset.
+private struct SevenPhases {
+    private var p0 = 0.0, p1 = 0.0, p2 = 0.0, p3 = 0.0, p4 = 0.0, p5 = 0.0, p6 = 0.0
+
+    mutating func advance(_ index: Int, by delta: Double) -> Double {
+        switch index {
+        case 0: return Self.step(&p0, delta)
+        case 1: return Self.step(&p1, delta)
+        case 2: return Self.step(&p2, delta)
+        case 3: return Self.step(&p3, delta)
+        case 4: return Self.step(&p4, delta)
+        case 5: return Self.step(&p5, delta)
+        default: return Self.step(&p6, delta)
+        }
+    }
+
+    private static func step(_ phase: inout Double, _ delta: Double) -> Double {
+        phase += delta
+        phase -= floor(phase)
+        return phase
     }
 }

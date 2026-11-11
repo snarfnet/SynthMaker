@@ -102,7 +102,7 @@ final class SynthEngine: NSObject, ObservableObject {
             cached = pending
             renderPlay = requestedPlay
             if renderRevision != revision {
-                dsp = GrooveDSP(sampleRate: 44_100)
+                dsp.reset()
                 fade = 0
                 renderRevision = revision
             }
@@ -121,6 +121,14 @@ final class SynthEngine: NSObject, ObservableObject {
         undoPatch = patch
         canUndo = true
         patch.generateRhythm(pulses: pulses, rotation: rotation, lane: lane)
+    }
+
+    func selectTone(_ model: Int) {
+        undoPatch = patch
+        canUndo = true
+        var next = patch
+        next.applyTone(model)
+        patch = next
     }
 
     func mutate() {
