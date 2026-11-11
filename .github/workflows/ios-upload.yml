@@ -7,46 +7,6 @@ permissions:
   contents: read
 jobs:
   upload:
-        description: Upload signed build after tests pass
-        type: boolean
-        default: false
-
-permissions:
-  contents: read
-
-concurrency:
-  group: lumi-ci-${{ github.ref }}
-  cancel-in-progress: false
-
-jobs:
-  build-test:
-    runs-on: macos-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - name: Portable project checks and newline regression
-        run: |
-          python3 tools/static_verify.py
-          python3 tools/test_static_verify.py
-      - name: Simulator tests and unsigned device build
-        run: bash tools/verify_on_mac.sh
-      - name: Keep build logs and test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: lumi-validation-${{ github.run_id }}
-          path: |
-            validation/mac/*.txt
-            validation/mac/*.log
-            validation/mac/*.xcresult
-            validation/mac/*.json
-            validation/mac/attachments-*
-            validation/windows-validation.json
-          retention-days: 14
-
-  upload:
     runs-on: macos-26
     timeout-minutes: 60
 
