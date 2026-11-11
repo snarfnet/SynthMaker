@@ -3,7 +3,7 @@ import Foundation
 @main
 struct GrooveCoreTests {
     static func main() throws {
-        for index in 0...5 {
+        for index in 0...7 {
             let patch = GroovePatch.preset(index)
             precondition(patch.isValid)
             let restored = try JSONDecoder().decode(GroovePatch.self, from: JSONEncoder().encode(patch))
@@ -173,6 +173,68 @@ struct GrooveCoreTests {
             }
             precondition(delta > 1, "Every LUMA-7 macro must change the sound")
         }
+        for chord in 0...8 {
+            var patch = GroovePatch.preset(6)
+            patch.tone.pad?.chord = chord
+            patch.tone.pad?.attack = 0.01
+            patch.tone.pad?.holdBeats = 0.25
+            patch.tone.pad?.release = 0.1
+            patch.steps = (0..<16).map { GrooveStep(note: 0, enabled: $0 == 0) }
+            var dsp = GrooveDSP(sampleRate: 44_100)
+            _ = dsp.nextSample(patch)
+            precondition(dsp.activeLumaVoices == LumaHarmony.count(chord))
+            for _ in 0..<30_000 { _ = dsp.nextSample(patch, triggerNotes: false) }
+            precondition(dsp.activeLumaVoices == 0, "Released voices must retire")
+        }
+        precondition((0..<4).map { LumaHarmony.interval(4, voice: $0, spread: 0) } == [0, 4, 7, 11])
+        precondition((0..<5).map { LumaHarmony.interval(8, voice: $0, spread: 0) } == [0, 3, 7, 10, 14])
+        var pad = GroovePatch.preset(6)
+        pad.tempo = 120
+        pad.tone.pad?.holdBeats = 2
+        pad.tone.pad?.release = 1
+        pad.tone.pad?.attack = 0.1
+        pad.steps = (0..<16).map { GrooveStep(note: $0 == 4 ? 5 : 0, enabled: $0 == 0 || $0 == 4) }
+        pad.steps[0].chord = 1; pad.steps[4].chord = 4
+        let savedPad = try JSONDecoder().decode(GroovePatch.self, from: JSONEncoder().encode(pad))
+        precondition(savedPad == pad && savedPad.isValid)
+        var poly = GrooveDSP(sampleRate: 44_100)
+        var firstFrames: [Float] = []
+        for _ in 0..<22_051 { firstFrames.append(poly.nextSample(pad)) }
+        precondition(poly.activeLumaVoices == 7, "Previous chord must overlap the next chord")
+        poly.releaseLumaVoices()
+        var tailEnergy = 0.0
+        for _ in 0..<44_200 {
+            let value = poly.nextSample(pad, triggerNotes: false)
+            tailEnergy += Double(value * value)
+        }
+        precondition(tailEnergy > 1 && poly.activeLumaVoices == 0)
+        poly.reset()
+        for expected in firstFrames { precondition(poly.nextSample(pad) == expected) }
+        for i in 0..<16 { pad.steps[i].enabled = true; pad.steps[i].chord = 8 }
+        pad.tone.pad?.holdBeats = 8; pad.tone.pad?.release = 6
+        pad.tone.pad?.attack = 0.005; pad.tone.pad?.detune = 15
+        pad.tone.octave = 3; pad.tone.pad?.spread = 2
+        for rate in [44_100.0, 48_000.0] {
+            var busy = GrooveDSP(sampleRate: rate)
+            var reachedLimit = false
+            for _ in 0..<Int(rate * 3) {
+                let value = busy.nextSample(pad)
+                precondition(value.isFinite && abs(value) <= 0.85)
+                precondition(busy.activeLumaVoices <= 24)
+                reachedLimit = reachedLimit || busy.activeLumaVoices == 24
+            }
+            precondition(reachedLimit, "Dense chords must exercise bounded voice stealing")
+        }
+        var legacyTone = try JSONSerialization.jsonObject(with: JSONEncoder().encode(GroovePatch.preset(3))) as! [String: Any]
+        var toneObject = legacyTone["tone"] as! [String: Any]
+        toneObject.removeValue(forKey: "pad"); legacyTone["tone"] = toneObject
+        let monoSave = try JSONDecoder().decode(GroovePatch.self, from: JSONSerialization.data(withJSONObject: legacyTone))
+        precondition(monoSave.tone.pad == nil && monoSave.isValid)
+        var badPad = pad; badPad.tone.pad?.release = .nan
+        precondition(!badPad.isValid)
+        badPad = pad; badPad.steps[0].chord = 99
+        precondition(!badPad.isValid)
+        print("PASS: chord intervals, independent overlapping voices, attack/release retirement, tail rendering, 24-voice limit, reset and legacy mono migration")
         print("PASS: legacy saves, modeled instruments, LUMA-7 macros, tails/reset, silence and high-register stability")
         print("PASS: Euclidean spacing, lane isolation, scale mutation, probability, cutoff locks, loop conditions")
         print("PASS: presets, persistence, validation, sample timing, swing, silence, output bounds, deterministic rendering")

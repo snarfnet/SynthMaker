@@ -10,10 +10,12 @@ struct GrooveStep: Codable, Equatable {
     var probability = 1.0
     var every = 1
     var cutoffLock: Double?
+    var chord: Int?
 }
 
 struct ToneSettings: Codable, Equatable {
     // 0: Acid, 1: Warm analog, 2: FM glass, 3: FM keys, 4: original LUMA-7.
+    var pad: LumaPadSettings?
     var model = 0
     var octave = 0
     var color = 0.4
@@ -23,7 +25,7 @@ struct ToneSettings: Codable, Equatable {
     var space = 0.0
 
     var isValid: Bool {
-        (0...4).contains(model) && (0...3).contains(octave)
+        (pad?.isValid ?? true) && (0...4).contains(model) && (0...3).contains(octave)
             && (0...1).contains(color) && (0...1).contains(bloom)
             && (0...1).contains(motion) && (0.1...3).contains(tail)
             && (0...0.6).contains(space)
@@ -92,6 +94,7 @@ struct GroovePatch: Codable, Equatable {
                 (-12...24).contains($0.note) && (0...1).contains($0.probability)
                     && [1, 2, 4].contains($0.every)
                     && ($0.cutoffLock == nil || (40...12000).contains($0.cutoffLock!))
+                    && ($0.chord == nil || (0...8).contains($0.chord!))
             }
     }
 
@@ -152,6 +155,24 @@ struct GroovePatch: Codable, Equatable {
             }
             if index == 3 { patch.tone.bloom = 0.8; patch.tone.motion = 0.35 }
         }
+        if index >= 6 {
+            patch.applyTone(4)
+            patch.tempo = index == 6 ? 96 : 120
+            patch.drums = index != 6
+            patch.tone.pad = LumaPadSettings()
+            patch.tone.pad?.attack = index == 6 ? 0.7 : 0.03
+            patch.tone.pad?.release = index == 6 ? 2.8 : 0.6
+            patch.tone.pad?.holdBeats = index == 6 ? 1 : 0.25
+            patch.tone.pad?.spread = 1
+            patch.tone.bloom = 0.8; patch.tone.color = 0.2; patch.tone.space = 0.3
+            patch.envMod = 0.05; patch.cutoff = 4200
+            patch.steps = (0..<16).map { i in
+                var step = GrooveStep(note: [0, 5, 3, 7][i / 4], enabled: i % 4 == 0,
+                                      kick: i % 4 == 0, hat: i % 4 == 2)
+                step.chord = [3, 3, 4, 3][i / 4]
+                return step
+            }
+        }
         return patch
     }
 }
@@ -174,6 +195,9 @@ struct GrooveDSP {
     private var voiceAccent = false
     private var toneEnvelope = 0.0
     private let echo: GrooveEcho
+    private let lumaBank: LumaPolyphony
+    private var wasPolyphonic = false
+    var activeLumaVoices: Int { lumaBank.activeCount }
     private var frequency = 55.0
     private var targetFrequency = 55.0
     private var envelope = 0.0
@@ -195,20 +219,27 @@ struct GrooveDSP {
     init(sampleRate: Double) {
         self.sampleRate = sampleRate
         self.echo = GrooveEcho(sampleRate: sampleRate)
+        self.lumaBank = LumaPolyphony(sampleRate: sampleRate)
     }
 
-    private init(sampleRate: Double, echo: GrooveEcho) {
+    private init(sampleRate: Double, echo: GrooveEcho, lumaBank: LumaPolyphony) {
         self.sampleRate = sampleRate
         self.echo = echo
+        self.lumaBank = lumaBank
     }
 
     mutating func reset() {
         // Reuse the preallocated delay memory when transport restarts.
         echo.reset()
-        self = GrooveDSP(sampleRate: sampleRate, echo: echo)
+        lumaBank.reset()
+        self = GrooveDSP(sampleRate: sampleRate, echo: echo, lumaBank: lumaBank)
     }
 
-    mutating func nextSample(_ patch: GroovePatch) -> Float {
+    func releaseLumaVoices() { lumaBank.releaseAll() }
+
+    mutating func nextSample(_ patch: GroovePatch, triggerNotes: Bool = true) -> Float {
+        let polyphonic = patch.tone.model == 4 && patch.tone.pad != nil
+        if polyphonic != wasPolyphonic { lumaBank.reset(); wasPolyphonic = polyphonic }
         if remaining <= 0 {
             let previousSlide = slide && active
             stepIndex = (stepIndex + 1) % 16
@@ -220,7 +251,7 @@ struct GrooveDSP {
             chanceState = chanceState &* 1664525 &+ 1013904223
             let chance = Double(chanceState) / (Double(UInt32.max) + 1)
             let cycle = (stepCount - 1) / 16
-            active = step.enabled && chance < step.probability && cycle % step.every == 0
+            active = triggerNotes && step.enabled && chance < step.probability && cycle % step.every == 0
             lockedCutoff = step.cutoffLock
             filterTick = 0
             slide = step.slide
@@ -235,8 +266,12 @@ struct GrooveDSP {
                 voiceAccent = step.accent
             }
             if active && !previousSlide { envelope = 0 }
-            if patch.drums && step.kick { kickAge = 0; kickPhase = 0 }
-            if patch.drums && step.hat { hatAge = 0 }
+            if polyphonic && active, let pad = patch.tone.pad {
+                lumaBank.trigger(root: targetFrequency, chord: step.chord ?? pad.chord,
+                                 settings: pad, tempo: patch.tempo, accent: step.accent)
+            }
+            if triggerNotes && patch.drums && step.kick { kickAge = 0; kickPhase = 0 }
+            if triggerNotes && patch.drums && step.hat { hatAge = 0 }
         }
         let gate = active && (slide || elapsed < duration * 0.65)
         let targetLevel = gate ? 1.0 : 0.0
@@ -253,7 +288,7 @@ struct GrooveDSP {
         default: osc = 2 * phase - 1 - blep(phase, dt)
         }
         var level = envelope
-        if patch.tone.model != 0 {
+        if patch.tone.model != 0 && !polyphonic {
             let t = patch.tone
             motionPhase += (0.12 + t.motion * 0.9) / sampleRate
             motionPhase -= floor(motionPhase)
@@ -313,7 +348,7 @@ struct GrooveDSP {
         }
         filterTick = (filterTick + 1) % 32
         let k = 1 / (0.7 + patch.resonance * 0.7)
-        let input = osc * level * (patch.tone.model == 0 ? (accent ? 0.32 : 0.23) : (voiceAccent ? 0.65 : 0.52))
+        let input = polyphonic ? lumaBank.render(patch.tone) : osc * level * (patch.tone.model == 0 ? (accent ? 0.32 : 0.23) : (voiceAccent ? 0.65 : 0.52))
         let v1 = (band + g * (input - low)) / (1 + g * (g + k))
         let v2 = low + g * v1
         band = 2 * v1 - band
@@ -400,5 +435,179 @@ private struct SevenPhases {
         phase += delta
         phase -= floor(phase)
         return phase
+    }
+}
+
+
+struct LumaPadSettings: Codable, Equatable {
+    var chord = 3
+    var attack = 0.4
+    var release = 2.0
+    var holdBeats = 1.0
+    var spread = 0
+    var detune = 4.0
+
+    var isValid: Bool {
+        (0...8).contains(chord) && (0.005...3).contains(attack)
+            && (0.05...6).contains(release) && (0.25...8).contains(holdBeats)
+            && (0...2).contains(spread) && (0...15).contains(detune)
+    }
+}
+
+enum LumaHarmony {
+    static let names = ["Single", "Minor", "Major", "Minor 7", "Major 7", "Sus 2", "Sus 4", "Add 9", "Minor 9"]
+
+    static func count(_ chord: Int) -> Int {
+        if chord == 0 { return 1 }
+        if chord == 8 { return 5 }
+        return chord == 3 || chord == 4 || chord == 7 ? 4 : 3
+    }
+
+    static func interval(_ chord: Int, voice: Int, spread: Int) -> Int {
+        let note: Int
+        switch chord {
+        case 1: note = voice == 0 ? 0 : (voice == 1 ? 3 : 7)
+        case 2: note = voice == 0 ? 0 : (voice == 1 ? 4 : 7)
+        case 3, 8: note = voice == 0 ? 0 : (voice == 1 ? 3 : (voice == 2 ? 7 : (voice == 3 ? 10 : 14)))
+        case 4: note = voice == 0 ? 0 : (voice == 1 ? 4 : (voice == 2 ? 7 : 11))
+        case 5: note = voice == 0 ? 0 : (voice == 1 ? 2 : 7)
+        case 6: note = voice == 0 ? 0 : (voice == 1 ? 5 : 7)
+        case 7: note = voice == 0 ? 0 : (voice == 1 ? 4 : (voice == 2 ? 7 : 14))
+        default: note = 0
+        }
+        let lift = spread == 1 ? (voice == 1 ? 12 : 0) : (spread == 2 && voice > 0 ? 12 : 0)
+        return note + lift
+    }
+}
+
+// One pool per renderer, allocated once. Old chords keep their own pitch and release.
+private final class LumaPolyphony {
+    static let capacity = 24
+    let sampleRate: Double
+    private var voices = Array(repeating: LumaPadVoice(), count: capacity)
+    private var ratios = Array(repeating: 1.0, count: 7)
+    private var weights = Array(repeating: 1.0, count: 7)
+    private var generation: UInt64 = 0
+    private var coefficientTick = 0
+    var activeCount: Int { voices.reduce(0) { $0 + ($1.active ? 1 : 0) } }
+
+    init(sampleRate: Double) { self.sampleRate = sampleRate }
+
+    func reset() {
+        for i in voices.indices { voices[i] = LumaPadVoice() }
+        coefficientTick = 0; generation = 0
+    }
+
+    func releaseAll() {
+        for i in voices.indices { voices[i].beginRelease() }
+    }
+
+    func trigger(root: Double, chord: Int, settings: LumaPadSettings, tempo: Double, accent: Bool) {
+        let count = LumaHarmony.count(chord)
+        generation &+= 1
+        for note in 0..<count {
+            var slot = -1
+            for i in voices.indices {
+                if !voices[i].active { slot = i; break }
+                if voices[i].generation == generation { continue }
+                if slot == -1 { slot = i; continue }
+                if voices[i].level < voices[slot].level
+                    || (voices[i].level == voices[slot].level && voices[i].age > voices[slot].age) { slot = i }
+            }
+            let cents = count == 1 ? 0 : (Double(note) / Double(count - 1) * 2 - 1) * settings.detune
+            let semitone = LumaHarmony.interval(chord, voice: note, spread: settings.spread)
+            let hz = root * pow(2, Double(semitone) / 12 + cents / 1200)
+            let oldSample = voices[slot].lastSample
+            voices[slot] = LumaPadVoice()
+            voices[slot].generation = generation
+            voices[slot].start(frequency: hz, settings: settings, tempo: tempo,
+                               sampleRate: sampleRate, gain: (accent ? 0.43 : 0.36) / sqrt(Double(count)),
+                               seed: Double(note) * 0.17, stolenSample: oldSample)
+        }
+    }
+
+    func render(_ tone: ToneSettings) -> Double {
+        if coefficientTick == 0 {
+            for i in 0..<7 {
+                let h = Double(i + 1)
+                ratios[i] = h * sqrt(1 + tone.color * 0.006 * (h * h - 1))
+                weights[i] = 1 / pow(h, 1.5 - tone.color * 0.45)
+            }
+        }
+        coefficientTick = (coefficientTick + 1) % 32
+        var sum = 0.0
+        for i in voices.indices where voices[i].active {
+            sum += voices[i].render(tone, ratios: ratios, weights: weights, sampleRate: sampleRate)
+        }
+        return sum
+    }
+}
+
+private struct LumaPadVoice {
+    var generation: UInt64 = 0
+    var active = false
+    var age = 0.0
+    var level = 0.0
+    var lastSample = 0.0
+    private var frequency = 0.0
+    private var gain = 0.0
+    private var phases = SevenPhases()
+    private var motionPhase = 0.0
+    private var attackFrames = 1.0
+    private var gateFrames = 1.0
+    private var releaseFrames = 1.0
+    private var releaseAge = 0.0
+    private var releasing = false
+    private var releaseLevel = 0.0
+    private var stolenSample = 0.0
+
+    mutating func start(frequency: Double, settings: LumaPadSettings, tempo: Double,
+                        sampleRate: Double, gain: Double, seed: Double, stolenSample: Double) {
+        active = true
+        self.frequency = frequency; self.gain = gain; self.motionPhase = seed
+        attackFrames = max(1, settings.attack * sampleRate)
+        gateFrames = attackFrames + settings.holdBeats * 60 / tempo * sampleRate
+        releaseFrames = max(1, settings.release * sampleRate)
+        self.stolenSample = stolenSample
+    }
+
+    mutating func beginRelease() {
+        guard active && !releasing else { return }
+        releasing = true; releaseAge = 0; releaseLevel = level
+    }
+
+    mutating func render(_ tone: ToneSettings, ratios: [Double], weights: [Double], sampleRate: Double) -> Double {
+        if age >= gateFrames { beginRelease() }
+        if releasing {
+            let remaining = max(0, 1 - releaseAge / releaseFrames)
+            level = releaseLevel * remaining * remaining
+            releaseAge += 1
+            if remaining == 0 { active = false; lastSample = 0; return 0 }
+        } else {
+            let progress = min(1, age / attackFrames)
+            level = progress * progress * (3 - 2 * progress)
+        }
+        motionPhase += (0.12 + tone.motion * 0.9) / sampleRate
+        motionPhase -= floor(motionPhase)
+        let drift = sin(2 * .pi * motionPhase)
+        let seconds = age / sampleRate
+        let opening = 1 - exp(-seconds / (0.025 + tone.bloom * 0.45))
+        var spectrum = 0.0
+        var normalization = 0.0
+        for i in 0..<7 {
+            let brightness = i == 0 ? 1 : (0.12 + opening * tone.bloom * 1.8)
+            let weight = weights[i] * brightness
+            let hz = frequency * ratios[i]
+            let phase = phases.advance(i, by: hz / sampleRate * (1 + drift * tone.motion * 0.0015))
+            if hz < sampleRate * 0.4 {
+                spectrum += sin(2 * .pi * phase + drift * tone.motion * Double(i + 1) * 0.12) * weight
+            }
+            normalization += weight
+        }
+        // A short ramp preserves continuity if a fully occupied pool must steal a voice.
+        let stealFade = max(0, 1 - age / (sampleRate * 0.005))
+        lastSample = spectrum / max(1, normalization) * level * gain + stolenSample * stealFade
+        age += 1
+        return lastSample
     }
 }

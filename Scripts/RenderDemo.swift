@@ -17,14 +17,15 @@ struct RenderDemo {
             patch.drums = false
             if model == 4 { patch.tone.bloom = 0.8; patch.tone.motion = 0.35 }
         }
+        if model == 6 || model == 7 { patch = .preset(model) }
         var dsp = GrooveDSP(sampleRate: 44_100)
         let musicalFrames = Int((44_100 * 60 / patch.tempo * (model > 0 ? 16 : 32)).rounded())
-        let frames = musicalFrames + (model > 0 ? 88_200 : 0)
+        let frames = musicalFrames + (model > 0 ? Int(44_100 * ((patch.tone.pad?.release ?? 0) + 2)) : 0)
         var pcm = Data(capacity: frames * 2)
         for frame in 0..<frames {
-            if frame == musicalFrames { for i in patch.steps.indices { patch.steps[i].enabled = false } }
+            if frame == musicalFrames { dsp.releaseLumaVoices() }
             let fade = min(1, min(Double(frame) / 220, Double(frames - frame - 1) / 220))
-            var sample = Int16((Double(dsp.nextSample(patch)) * fade * 32767).rounded()).littleEndian
+            var sample = Int16((Double(dsp.nextSample(patch, triggerNotes: frame < musicalFrames)) * fade * 32767).rounded()).littleEndian
             withUnsafeBytes(of: &sample) { pcm.append(contentsOf: $0) }
         }
         var wav = Data()

@@ -13,6 +13,8 @@ struct ContentView: View {
     @State private var pulses = 5
     @State private var rotation = 0
     @State private var lane = 0
+    @State private var includePadTail = true
+    private var isPad: Bool { synth.patch.tone.model == 4 && synth.patch.tone.pad != nil }
 
     private let amber = Color(red: 1, green: 0.72, blue: 0.22)
     private let cyan = Color(red: 0.22, green: 0.88, blue: 1)
@@ -125,7 +127,16 @@ struct ContentView: View {
             Stepper("Note: \(noteName(synth.patch.steps[selectedStep].note))", value: $synth.patch.steps[selectedStep].note, in: -12...24)
             HStack {
                 Toggle("Accent", isOn: $synth.patch.steps[selectedStep].accent)
-                Toggle("Slide", isOn: $synth.patch.steps[selectedStep].slide)
+                if !isPad { Toggle("Slide", isOn: $synth.patch.steps[selectedStep].slide) }
+            }
+            if isPad {
+                Picker("Step chord", selection: Binding(
+                    get: { synth.patch.steps[selectedStep].chord ?? -1 },
+                    set: { synth.patch.steps[selectedStep].chord = $0 == -1 ? nil : $0 }
+                )) {
+                    Text("Use instrument chord").tag(-1)
+                    ForEach(0..<LumaHarmony.names.count, id: \.self) { Text(LumaHarmony.names[$0]).tag($0) }
+                }.pickerStyle(.menu)
             }
             HStack {
                 Toggle("Kick", isOn: $synth.patch.steps[selectedStep].kick)
@@ -199,7 +210,7 @@ struct ContentView: View {
             if synth.patch.tone.model != 0 {
                 if synth.patch.tone.model == 4 {
                     Text("LUMA-7").font(.system(size: 28, weight: .light, design: .rounded)).foregroundColor(cyan)
-                    Text("Seven partials. A slow bloom. A little instability. Our original monophonic instrument — from soft light to struck glass.")
+                    Text("Seven partials. A slow bloom. A little instability. Our original instrument — from soft light to layered chords.")
                         .font(.caption).foregroundColor(.secondary)
                 }
                 parameter("Color", value: $synth.patch.tone.color, range: 0...1, text: "\(Int(synth.patch.tone.color * 100))%")
@@ -209,9 +220,10 @@ struct ContentView: View {
                 if synth.patch.tone.model == 1 || synth.patch.tone.model == 4 {
                     parameter("Motion", value: $synth.patch.tone.motion, range: 0...1, text: "\(Int(synth.patch.tone.motion * 100))%")
                 }
-                parameter("Tone tail", value: $synth.patch.tone.tail, range: 0.1...3, text: String(format: "%.2f s", synth.patch.tone.tail))
-                Text("These are synthesis models, not exact replicas of named hardware. One melodic voice; new notes retune the current voice.")
-                    .font(.caption).foregroundColor(.secondary)
+                if !isPad { parameter("Tone tail", value: $synth.patch.tone.tail, range: 0.1...3, text: String(format: "%.2f s", synth.patch.tone.tail)) }
+                if !isPad { Text("These are synthesis models, not exact replicas of named hardware. One melodic voice; new notes retune the current voice.")
+                    .font(.caption).foregroundColor(.secondary) }
+                if synth.patch.tone.model == 4 { padControls }
             }
             parameter("Tape echo", value: $synth.patch.tone.space, range: 0...0.6, text: "\(Int(synth.patch.tone.space * 100))%")
             Text("Dotted-eighth echoes follow the tempo. Warm, damped repeats affect the instrument only.")
@@ -230,6 +242,36 @@ struct ContentView: View {
         .padding(16).background(panel)
     }
 
+    private func padValue<Value>(_ key: WritableKeyPath<LumaPadSettings, Value>) -> Binding<Value> {
+        Binding(get: { (synth.patch.tone.pad ?? LumaPadSettings())[keyPath: key] }, set: { value in
+            var settings = synth.patch.tone.pad ?? LumaPadSettings()
+            settings[keyPath: key] = value
+            synth.patch.tone.pad = settings
+        })
+    }
+
+    private var padControls: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Toggle("Polyphonic chords & pads", isOn: Binding(
+                get: { isPad }, set: { synth.patch.tone.pad = $0 ? LumaPadSettings() : nil }
+            ))
+            if let pad = synth.patch.tone.pad {
+                Picker("Default chord", selection: padValue(\.chord)) {
+                    ForEach(0..<LumaHarmony.names.count, id: \.self) { Text(LumaHarmony.names[$0]).tag($0) }
+                }.pickerStyle(.menu)
+                Picker("Voicing", selection: padValue(\.spread)) {
+                    Text("Close").tag(0); Text("Open").tag(1); Text("Wide").tag(2)
+                }.pickerStyle(.segmented)
+                parameter("Pad attack", value: padValue(\.attack), range: 0.005...3, text: String(format: "%.2f s", pad.attack))
+                parameter("Hold after attack", value: padValue(\.holdBeats), range: 0.25...8, text: String(format: "%.2f beats", pad.holdBeats), step: 0.25)
+                parameter("Pad release", value: padValue(\.release), range: 0.05...6, text: String(format: "%.2f s", pad.release))
+                parameter("Detune", value: padValue(\.detune), range: 0...15, text: String(format: "%.1f cents", pad.detune))
+                Text("Up to 24 overlapping voices. Each chord keeps its own pitch and release. Choose a chord on each step to make a progression. Slide is replaced by overlapping notes in this mode. Output is mono; voicing changes register, not stereo width.")
+                    .font(.caption).foregroundColor(.secondary)
+            }
+        }
+    }
+
     private var library: some View {
         VStack(alignment: .leading, spacing: 16) {
             heading("PATTERNS & EXPORT", detail: "Keep what you make")
@@ -240,6 +282,8 @@ struct ContentView: View {
                 Button("LUMA-7 · First Light") { confirmPreset = 3 }
                 Button("Glass Bell · Starlight") { confirmPreset = 4 }
                 Button("Soft Keys · Night Transit") { confirmPreset = 5 }
+                Button("LUMA-7 · Cloud Garden Pad") { confirmPreset = 6 }
+                Button("LUMA-7 · Velvet Chords") { confirmPreset = 7 }
             }
             Picker("Save slot", selection: $slot) {
                 ForEach(1...4, id: \.self) { Text("Slot \($0)").tag($0) }
@@ -248,7 +292,8 @@ struct ContentView: View {
                 Button("Save") { confirmSave = true }.frame(maxWidth: .infinity)
                 Button("Load") { confirmLoad = slot }.frame(maxWidth: .infinity)
             }.buttonStyle(.bordered).controlSize(.large)
-            Button { synth.exportWAV() } label: {
+            if isPad { Toggle("Include release tail in WAV", isOn: $includePadTail) }
+            Button { synth.exportWAV(includeTail: isPad && includePadTail) } label: {
                 Label(synth.isExporting ? "Rendering…" : "Export 4 bars as WAV", systemImage: "square.and.arrow.up")
                     .frame(maxWidth: .infinity, minHeight: 44)
             }.buttonStyle(.bordered).disabled(synth.isExporting)

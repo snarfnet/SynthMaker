@@ -170,13 +170,13 @@ final class SynthEngine: NSObject, ObservableObject {
         } catch { message = "Could not load: \(error.localizedDescription)" }
     }
 
-    func exportWAV() {
+    func exportWAV(includeTail: Bool = false) {
         guard !isExporting, patch.isValid else { return }
         isExporting = true
         let snapshot = patch
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             do {
-                let url = try Self.writeWAV(snapshot)
+                let url = try Self.writeWAV(snapshot, includeTail: includeTail)
                 DispatchQueue.main.async { self?.isExporting = false; self?.exportURL = url }
             } catch {
                 DispatchQueue.main.async {
@@ -187,7 +187,7 @@ final class SynthEngine: NSObject, ObservableObject {
         }
     }
 
-    private static func writeWAV(_ snapshot: GroovePatch) throws -> URL {
+    private static func writeWAV(_ snapshot: GroovePatch, includeTail: Bool) throws -> URL {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("SynthMaker-Exports", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appendingPathComponent("SynthMaker-\(UUID().uuidString.prefix(8)).wav")
@@ -195,7 +195,9 @@ final class SynthEngine: NSObject, ObservableObject {
         let file = try AVAudioFile(forWriting: url, settings: format.settings)
         let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1024)!
         var renderer = GrooveDSP(sampleRate: 44_100)
-        let frames = Int((44_100 * 60 / snapshot.tempo * 16).rounded()) // Four bars.
+        let musicalFrames = Int((44_100 * 60 / snapshot.tempo * 16).rounded()) // Four bars.
+        let tailSeconds = includeTail ? (snapshot.tone.pad?.release ?? 0) + 2 : 0
+        let frames = musicalFrames + Int(tailSeconds * 44_100)
         var position = 0
         while position < frames {
             let length = min(1024, frames - position)
@@ -203,7 +205,9 @@ final class SynthEngine: NSObject, ObservableObject {
             for i in 0..<length {
                 // Short edge fades prevent clicks in the exported file.
                 let fade = min(1, min(Double(position + i) / 220, Double(frames - position - i - 1) / 220))
-                buffer.floatChannelData![0][i] = renderer.nextSample(snapshot) * Float(fade)
+                let frame = position + i
+                if frame == musicalFrames { renderer.releaseLumaVoices() }
+                buffer.floatChannelData![0][i] = renderer.nextSample(snapshot, triggerNotes: frame < musicalFrames) * Float(fade)
             }
             try file.write(from: buffer)
             position += length
