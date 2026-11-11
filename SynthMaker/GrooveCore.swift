@@ -271,7 +271,7 @@ struct GrooveDSP {
                 let secondDT = dt * pow(2, (3 + t.motion * 9) / 1200)
                 let sawB = 2 * secondPhase - 1 - blep(secondPhase, secondDT)
                 osc = (sawA + sawB) * (0.18 + t.color * 0.22)
-                    + sin(2 * .pi * phase) * (0.64 - t.color * 0.44)
+                    - sin(2 * .pi * phase) * (0.64 - t.color * 0.44)
             case 2:
                 let index = (0.2 + t.color * 2.4) * exp(-voiceAge / (0.08 + t.bloom * 1.4))
                 osc = sin(2 * .pi * phase + sin(2 * .pi * modulatorPhase) * index)
