@@ -7,6 +7,9 @@ struct GrooveStep: Codable, Equatable {
     var slide = false
     var kick = false
     var hat = false
+    var probability = 1.0
+    var every = 1
+    var cutoffLock: Double?
 }
 
 struct GroovePatch: Codable, Equatable {
@@ -31,7 +34,42 @@ struct GroovePatch: Codable, Equatable {
             && (40...12000).contains(cutoff) && (0...10).contains(resonance)
             && (0...1).contains(envMod) && (0.03...1).contains(decay)
             && (0...1).contains(drive) && (0...3).contains(waveform)
-            && steps.allSatisfy { (-12...24).contains($0.note) }
+            && steps.allSatisfy {
+                (-12...24).contains($0.note) && (0...1).contains($0.probability)
+                    && [1, 2, 4].contains($0.every)
+                    && ($0.cutoffLock == nil || (40...12000).contains($0.cutoffLock!))
+            }
+    }
+
+    // Distribute hits as evenly as possible. Rotation moves the pattern around the bar.
+    static func euclidean(pulses: Int, rotation: Int) -> [Bool] {
+        let hits = min(16, max(0, pulses))
+        let offset = (rotation % 16 + 16) % 16
+        return (0..<16).map { ((($0 - offset + 16) % 16) * hits) % 16 < hits }
+    }
+
+    mutating func generateRhythm(pulses: Int, rotation: Int, lane: Int) {
+        let rhythm = Self.euclidean(pulses: pulses, rotation: rotation)
+        for i in steps.indices {
+            switch lane {
+            case 1: steps[i].kick = rhythm[i]
+            case 2: steps[i].hat = rhythm[i]
+            default: steps[i].enabled = rhythm[i]
+            }
+        }
+    }
+
+    mutating func mutate(seed: UInt64) {
+        let scale = [0, 3, 5, 7, 10, 12] // A minor pentatonic: every generated pitch fits the key.
+        var state = seed
+        for i in steps.indices {
+            state = state &* 6364136223846793005 &+ 1442695040888963407
+            if (state >> 32) % 3 == 0 {
+                steps[i].note = scale[Int((state >> 40) % UInt64(scale.count))]
+                steps[i].accent = (state & 1) == 0
+                steps[i].slide = (state & 6) == 0
+            }
+        }
     }
 
     static func preset(_ index: Int) -> GroovePatch {
@@ -78,6 +116,8 @@ struct GrooveDSP {
     private var kickPhase = 0.0
     private var hatAge = 100.0
     private var lastNoise = 0.0
+    private var chanceState: UInt32 = 0xABCDEF01
+    private var lockedCutoff: Double?
     private var noiseState: UInt32 = 0x12345678
 
     init(sampleRate: Double) { self.sampleRate = sampleRate }
@@ -91,7 +131,12 @@ struct GrooveDSP {
             duration = sampleRate * 60 / patch.tempo / 4 * (stepIndex % 2 == 0 ? 1 + patch.swing : 1 - patch.swing)
             remaining += duration // Preserve fractional samples to avoid cumulative tempo drift.
             elapsed = 0
-            active = step.enabled
+            chanceState = chanceState &* 1664525 &+ 1013904223
+            let chance = Double(chanceState) / (Double(UInt32.max) + 1)
+            let cycle = (stepCount - 1) / 16
+            active = step.enabled && chance < step.probability && cycle % step.every == 0
+            lockedCutoff = step.cutoffLock
+            filterTick = 0
             slide = step.slide
             accent = step.accent
             targetFrequency = 55 * pow(2, Double(step.note) / 12)
@@ -119,7 +164,7 @@ struct GrooveDSP {
         // A resonant TPT state-variable filter. Env Mod now moves the cutoff.
         if filterTick == 0 {
             let modulation = patch.envMod * 5000 * exp(-elapsed / sampleRate / patch.decay) * (accent ? 1.35 : 1)
-            let hz = min(sampleRate * 0.4, patch.cutoff + modulation)
+            let hz = min(sampleRate * 0.4, (lockedCutoff ?? patch.cutoff) + modulation)
             g = tan(.pi * hz / sampleRate)
         }
         filterTick = (filterTick + 1) % 32

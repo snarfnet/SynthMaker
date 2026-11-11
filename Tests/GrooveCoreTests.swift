@@ -57,6 +57,62 @@ struct GrooveCoreTests {
         for _ in 0..<44_100 {
             precondition(first.nextSample(.preset(0)) == second.nextSample(.preset(0)), "Export must reproduce playback DSP")
         }
+        for hits in 0...16 {
+            for rotation in 0..<16 {
+                let rhythm = GroovePatch.euclidean(pulses: hits, rotation: rotation)
+                precondition(rhythm.filter { $0 }.count == hits)
+                let indices = rhythm.indices.filter { rhythm[$0] }
+                if hits > 1 {
+                    let gaps = indices.indices.map { (indices[($0 + 1) % hits] - indices[$0] + 16) % 16 }
+                    precondition(gaps.max()! - gaps.min()! <= 1, "Euclidean hits must be evenly distributed")
+                }
+            }
+        }
+        var generated = GroovePatch()
+        let original = generated
+        generated.generateRhythm(pulses: 5, rotation: 3, lane: 1)
+        precondition(generated.steps.filter { $0.kick }.count == 5)
+        for i in 0..<16 {
+            precondition(generated.steps[i].note == original.steps[i].note)
+            precondition(generated.steps[i].enabled == original.steps[i].enabled)
+            precondition(generated.steps[i].hat == original.steps[i].hat)
+        }
+        generated.mutate(seed: 42)
+        precondition(generated != original && generated.isValid)
+        precondition(generated.steps.allSatisfy { [0, 3, 5, 7, 10, 12].contains($0.note) })
+        for i in 0..<16 { precondition(generated.steps[i].enabled == original.steps[i].enabled) }
+
+        var probability = GroovePatch()
+        probability.drums = false
+        for i in 0..<16 { probability.steps[i].probability = 0 }
+        var chanceDSP = GrooveDSP(sampleRate: 44_100)
+        for _ in 0..<88_200 { precondition(chanceDSP.nextSample(probability) == 0) }
+        var locked = GroovePatch()
+        locked.steps[0].cutoffLock = 80
+        locked.steps[1].probability = 0.35
+        locked.steps[2].every = 4
+        let restoredLocks = try JSONDecoder().decode(GroovePatch.self, from: JSONEncoder().encode(locked))
+        precondition(restoredLocks == locked)
+        var plainDSP = GrooveDSP(sampleRate: 44_100)
+        var lockedDSP = GrooveDSP(sampleRate: 44_100)
+        var difference = 0.0
+        for _ in 0..<4000 {
+            difference += abs(Double(plainDSP.nextSample(.preset(0)) - lockedDSP.nextSample(locked)))
+        }
+        precondition(difference > 1, "Cutoff locks must change the rendered sound")
+        var conditional = GroovePatch()
+        conditional.tempo = 120; conditional.drums = false
+        for i in 0..<16 { conditional.steps[i].every = 2 }
+        var conditionalDSP = GrooveDSP(sampleRate: 44_100)
+        var energyByBar = [0.0, 0.0, 0.0]
+        for bar in 0..<3 {
+            for frame in 0..<88_200 {
+                let value = Double(conditionalDSP.nextSample(conditional))
+                if frame > 44_100 { energyByBar[bar] += value * value }
+            }
+        }
+        precondition(energyByBar[0] > 1 && energyByBar[1] < 0.00001 && energyByBar[2] > 1)
+        print("PASS: Euclidean spacing, lane isolation, scale mutation, probability, cutoff locks, loop conditions")
         print("PASS: presets, persistence, validation, sample timing, swing, silence, output bounds, deterministic rendering")
     }
 }

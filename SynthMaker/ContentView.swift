@@ -10,6 +10,9 @@ struct ContentView: View {
     @State private var confirmSave = false
     @State private var confirmPreset: Int?
     @State private var share = false
+    @State private var pulses = 5
+    @State private var rotation = 0
+    @State private var lane = 0
 
     private let amber = Color(red: 1, green: 0.72, blue: 0.22)
     private let cyan = Color(red: 0.22, green: 0.88, blue: 1)
@@ -33,6 +36,7 @@ struct ContentView: View {
                         .font(.subheadline).foregroundColor(.secondary)
                     transport
                     pattern
+                    evolution
                     sound
                     library
                     Text("16 steps · 1 bar · A minor starting pattern\nWAV export: 4 bars · 44.1 kHz · mono")
@@ -60,7 +64,7 @@ struct ContentView: View {
             set: { if !$0 { confirmLoad = nil; confirmPreset = nil } }
         ), titleVisibility: .visible) {
             Button("Replace pattern", role: .destructive) {
-                if let index = confirmPreset { synth.stop(); synth.patch = .preset(index) }
+                if let index = confirmPreset { synth.replacePatch(.preset(index)) }
                 if let index = confirmLoad { synth.load(slot: index) }
                 confirmLoad = nil; confirmPreset = nil
             }
@@ -127,7 +131,51 @@ struct ContentView: View {
                 Toggle("Kick", isOn: $synth.patch.steps[selectedStep].kick)
                 Toggle("Hi-hat", isOn: $synth.patch.steps[selectedStep].hat)
             }
+            parameter("Note probability", value: $synth.patch.steps[selectedStep].probability,
+                      range: 0...1, text: "\(Int(synth.patch.steps[selectedStep].probability * 100))%", step: 0.05)
+            Picker("Play note", selection: $synth.patch.steps[selectedStep].every) {
+                Text("Every loop").tag(1); Text("Every 2nd").tag(2); Text("Every 4th").tag(4)
+            }.pickerStyle(.segmented)
+            Toggle("Lock cutoff for this step", isOn: Binding(
+                get: { synth.patch.steps[selectedStep].cutoffLock != nil },
+                set: { synth.patch.steps[selectedStep].cutoffLock = $0 ? synth.patch.cutoff : nil }
+            ))
+            if synth.patch.steps[selectedStep].cutoffLock != nil {
+                parameter("Step cutoff", value: Binding(
+                    get: { synth.patch.steps[selectedStep].cutoffLock ?? synth.patch.cutoff },
+                    set: { synth.patch.steps[selectedStep].cutoffLock = $0 }
+                ), range: 40...12000, text: "\(Int(synth.patch.steps[selectedStep].cutoffLock ?? synth.patch.cutoff)) Hz")
+            }
+            Text("Probability and loop conditions affect the bass only. Conditional notes start on loop 1. A cutoff lock overrides the main cutoff for this step.")
+                .font(.caption).foregroundColor(.secondary)
             Text("Accent adds emphasis. Slide carries this note into the next. K = kick, H = hi-hat.")
+                .font(.caption).foregroundColor(.secondary)
+        }
+        .padding(16).background(panel)
+    }
+
+    private var evolution: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            heading("EVOLUTION", detail: "Generate rhythms and variations")
+            Text("Euclidean rhythm").font(.headline)
+            Picker("Rhythm lane", selection: $lane) {
+                Text("Bass").tag(0); Text("Kick").tag(1); Text("Hi-hat").tag(2)
+            }.pickerStyle(.segmented)
+            Stepper("Hits: \(pulses) / 16", value: $pulses, in: 0...16)
+            Stepper("Rotation: \(rotation)", value: $rotation, in: 0...15)
+            Button("Apply rhythm to selected lane") {
+                synth.generateRhythm(pulses: pulses, rotation: rotation, lane: lane)
+            }.buttonStyle(.bordered).controlSize(.large)
+            Text("Space hits evenly across 16 steps. Try 5 bass notes against a 4-hit kick.")
+                .font(.caption).foregroundColor(.secondary)
+            Divider()
+            Button("Mutate bass · A minor pentatonic") { synth.mutate() }
+                .buttonStyle(.bordered).controlSize(.large)
+            Text("Changes some notes, accents and slides while keeping the rhythm and drums. Changes apply during playback.")
+                .font(.caption).foregroundColor(.secondary)
+            Button("Undo last generation / pattern load") { synth.undoGeneration() }
+                .disabled(!synth.canUndo)
+            Text("Undo restores the full pattern from before the last generation or load, including any edits made since then.")
                 .font(.caption).foregroundColor(.secondary)
         }
         .padding(16).background(panel)

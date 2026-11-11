@@ -7,6 +7,8 @@ A one-bar acid groovebox for iPhone. Press Play to start the bass, kick and hi-h
 - Sample-clocked 16-step playback, 60–180 BPM and swing.
 - Per-step pitch, rest, accent, slide, kick and hi-hat.
 - Four bass waveforms; resonant filter with envelope modulation; drive.
+- Per-note probability and every-2/every-4-loop conditions, with per-step cutoff locks.
+- Euclidean rhythm generation for each lane; A minor pentatonic mutation; one-level full-pattern undo for generation/load.
 - Three starting patterns and four local save slots for the full pattern and sound.
 - Four-bar mono WAV export at 44.1 kHz, using the same DSP as live playback.
 - Stops on backgrounding, audio interruptions and headphone disconnection.
@@ -29,7 +31,7 @@ swiftc SynthMaker/GrooveCore.swift Tests/GrooveCoreTests.swift -o /tmp/groove-te
 /tmp/groove-tests
 ```
 
-Tests cover preset validity, complete JSON round trips, rejected invalid saves, fractional sample timing over eight bars at two sample rates, extreme swing, silence, output limits and deterministic rendering. These ran successfully with Swift 6.3.3 on Windows. They do not verify AVAudioEngine, SwiftUI or perceived sound quality.
+Tests cover preset validity, complete JSON round trips, rejected invalid saves, fractional sample timing over eight bars at two sample rates, extreme swing, silence, output limits and deterministic rendering. Evolution tests also check Euclidean spacing and hit counts, lane isolation, scale-safe mutation, probability-zero silence, audible cutoff locks and alternating conditional bars. These ran successfully with Swift 6.3.3 on Windows. They do not verify AVAudioEngine, SwiftUI or perceived sound quality.
 
 Before shipping, run the iOS build and check on real devices:
 
@@ -39,5 +41,11 @@ Before shipping, run the iOS build and check on real devices:
 - Export all presets, share to Files, reopen the WAV, confirm four-bar duration and edge fades.
 - Small iPhone screens, large text, VoiceOver, sustained playback and CPU/battery use.
 - Update App Store screenshots, feature text and advertising/privacy declarations to match the shipped binary.
+
+## Audio preview
+
+`Scripts/RenderDemo.swift` renders an eight-bar WAV with the same DSP, using Euclidean bass rhythm, probability, loop conditions and cutoff locks. Compile it with `GrooveCore.swift` and pass an output WAV path. This offline preview does not verify device playback or sharing.
+
+The initial iOS simulator build passed in GitHub Actions. Rerun CI after subsequent edits and complete real-device checks before release.
 
 No App Store upload or release is performed by this change.

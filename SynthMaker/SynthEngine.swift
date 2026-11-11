@@ -9,6 +9,8 @@ final class SynthEngine: NSObject, ObservableObject {
     @Published var message: String?
     @Published private(set) var isExporting = false
     @Published var exportURL: URL?
+    @Published private(set) var canUndo = false
+    private var undoPatch: GroovePatch?
 
     private var audioEngine = AVAudioEngine()
     private let mailbox = NSLock()
@@ -115,6 +117,32 @@ final class SynthEngine: NSObject, ObservableObject {
         }
     }
 
+    func generateRhythm(pulses: Int, rotation: Int, lane: Int) {
+        undoPatch = patch
+        canUndo = true
+        patch.generateRhythm(pulses: pulses, rotation: rotation, lane: lane)
+    }
+
+    func mutate() {
+        undoPatch = patch
+        canUndo = true
+        patch.mutate(seed: UInt64.random(in: 0...UInt64.max))
+    }
+
+    func undoGeneration() {
+        guard let previous = undoPatch else { return }
+        patch = previous
+        undoPatch = nil
+        canUndo = false
+    }
+
+    func replacePatch(_ replacement: GroovePatch) {
+        stop()
+        undoPatch = patch
+        canUndo = true
+        patch = replacement
+    }
+
     func save(slot: Int) {
         do {
             let data = try JSONEncoder().encode(patch)
@@ -130,8 +158,7 @@ final class SynthEngine: NSObject, ObservableObject {
         do {
             let saved = try JSONDecoder().decode(GroovePatch.self, from: data)
             guard saved.isValid else { message = "This saved pattern is invalid."; return }
-            stop()
-            patch = saved
+            replacePatch(saved)
         } catch { message = "Could not load: \(error.localizedDescription)" }
     }
 
@@ -141,26 +168,7 @@ final class SynthEngine: NSObject, ObservableObject {
         let snapshot = patch
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             do {
-                let directory = FileManager.default.temporaryDirectory.appendingPathComponent("SynthMaker-Exports", isDirectory: true)
-                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                let url = directory.appendingPathComponent("SynthMaker-\(UUID().uuidString.prefix(8)).wav")
-                let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!
-                let file = try AVAudioFile(forWriting: url, settings: format.settings)
-                let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1024)!
-                var renderer = GrooveDSP(sampleRate: 44_100)
-                let frames = Int((44_100 * 60 / snapshot.tempo * 16).rounded()) // Four bars.
-                var position = 0
-                while position < frames {
-                    let length = min(1024, frames - position)
-                    buffer.frameLength = AVAudioFrameCount(length)
-                    for i in 0..<length {
-                        // Short edge fades prevent clicks in the exported file.
-                        let fade = min(1, min(Double(position + i) / 220, Double(frames - position - i - 1) / 220))
-                        buffer.floatChannelData![0][i] = renderer.nextSample(snapshot) * Float(fade)
-                    }
-                    try file.write(from: buffer)
-                    position += length
-                }
+                let url = try Self.writeWAV(snapshot)
                 DispatchQueue.main.async { self?.isExporting = false; self?.exportURL = url }
             } catch {
                 DispatchQueue.main.async {
@@ -169,6 +177,30 @@ final class SynthEngine: NSObject, ObservableObject {
                 }
             }
         }
+    }
+
+    private static func writeWAV(_ snapshot: GroovePatch) throws -> URL {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("SynthMaker-Exports", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("SynthMaker-\(UUID().uuidString.prefix(8)).wav")
+        let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!
+        let file = try AVAudioFile(forWriting: url, settings: format.settings)
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1024)!
+        var renderer = GrooveDSP(sampleRate: 44_100)
+        let frames = Int((44_100 * 60 / snapshot.tempo * 16).rounded()) // Four bars.
+        var position = 0
+        while position < frames {
+            let length = min(1024, frames - position)
+            buffer.frameLength = AVAudioFrameCount(length)
+            for i in 0..<length {
+                // Short edge fades prevent clicks in the exported file.
+                let fade = min(1, min(Double(position + i) / 220, Double(frames - position - i - 1) / 220))
+                buffer.floatChannelData![0][i] = renderer.nextSample(snapshot) * Float(fade)
+            }
+            try file.write(from: buffer)
+            position += length
+        }
+        return url
     }
 
     @objc private func interrupted(_ notification: Notification) {
