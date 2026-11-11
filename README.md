@@ -16,7 +16,7 @@ A one-bar acid groovebox for iPhone. Press Play to start the bass, kick and hi-h
 - Stops on backgrounding, audio interruptions and headphone disconnection.
 - Removes the advertising banner and tracking request from the application path.
 
-The old manual keyboard/ADSR screen is replaced by the groove editor. This is a focused groovebox iteration, not a full DAW. MIDI, AUv3, song arrangement, undo, automation and a dedicated keyboard are not included yet. Exported files have short edge fades; seamless loop tails are not implemented.
+The old manual keyboard/ADSR screen is replaced by the groove editor. This is a focused groovebox iteration, not a full DAW. MIDI, AUv3, song arrangement, automation and a dedicated keyboard are not included yet. Exported files have short edge fades; seamless loop tails are not implemented.
 
 ## LUMA-7 and modeled instruments
 
@@ -77,3 +77,6 @@ Before shipping, run the iOS build and check on real devices:
 The initial iOS simulator build passed in GitHub Actions. Rerun CI after subsequent edits and complete real-device checks before release.
 
 No App Store upload or release is performed by this change.
+
+## Submission
+Version 1.1 build 109 was submitted on 2026-11-11 and is waiting for App Review. Physical-device audio and CPU testing remain unverified.
