@@ -19,6 +19,11 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
+      - name: Test groove DSP
+        run: |
+          swiftc SynthMaker/GrooveCore.swift Tests/GrooveCoreTests.swift -o /tmp/groove-tests
+          /tmp/groove-tests
+
       - name: Build app
         run: |
           xcodebuild \

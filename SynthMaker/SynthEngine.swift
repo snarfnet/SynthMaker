@@ -3,231 +3,250 @@ import AVFoundation
 import AudioToolbox
 
 final class SynthEngine: NSObject, ObservableObject {
-    @Published var frequency: Double = 440 {
-        didSet { updateRenderSettings() }
-    }
-    @Published var waveform: Double = 0 {
-        didSet { updateRenderSettings() }
-    }
-    @Published var filterCutoff: Double = 2000 {
-        didSet { updateFilter() }
-    }
-    @Published var resonance: Double = 1 {
-        didSet { updateFilter() }
-    }
-    @Published var envelopeAmount: Double = 0.5 {
-        didSet { updateRenderSettings() }
-    }
-    @Published var attack: Double = 0.01 {
-        didSet { updateRenderSettings() }
-    }
-    @Published var decay: Double = 0.1 {
-        didSet { updateRenderSettings() }
-    }
-    @Published var sustain: Double = 0.7 {
-        didSet { updateRenderSettings() }
-    }
-    @Published var release: Double = 0.2 {
-        didSet { updateRenderSettings() }
-    }
+    @Published var patch = GroovePatch() { didSet { publishSettings() } }
+    @Published private(set) var isPlaying = false
+    @Published private(set) var currentStep = -1
+    @Published var message: String?
+    @Published private(set) var isExporting = false
+    @Published var exportURL: URL?
+    @Published private(set) var canUndo = false
+    private var undoPatch: GroovePatch?
 
-    private struct RenderState {
-        var frequency: Double = 440
-        var waveform: Int = 0
-        var envelopeAmount: Double = 0.5
-        var attack: Double = 0.01
-        var decay: Double = 0.1
-        var sustain: Double = 0.7
-        var release: Double = 0.2
-        var phase: Double = 0
-        var sampleRate: Double = 44_100
-        var samplePosition: UInt64 = 0
-        var noteOnSample: UInt64?
-        var releaseStartSample: UInt64?
-        var releaseStartLevel: Double = 0
-    }
-
-    private let audioEngine = AVAudioEngine()
-    private let stateLock = NSLock()
-    private var renderState = RenderState()
-    private var filterNode: AVAudioUnitEQ?
-    private var currentNoteID = 0
-    private var isRunning = false
+    private var audioEngine = AVAudioEngine()
+    private let mailbox = NSLock()
+    private var pending = GroovePatch()
+    private var requestedPlay = false
+    private var revision = 0
+    private var reportedStep = -1
+    // Only the audio callback accesses the render state below.
+    private var cached = GroovePatch()
+    private var renderPlay = false
+    private var renderRevision = -1
+    private var dsp = GrooveDSP(sampleRate: 44_100)
+    private var fade = 0.0
+    private var configured = false
+    private var displayTimer: Timer?
 
     override init() {
         super.init()
+        NotificationCenter.default.addObserver(self, selector: #selector(interrupted),
+            name: AVAudioSession.interruptionNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(routeChanged),
+            name: AVAudioSession.routeChangeNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(mediaReset),
+            name: AVAudioSession.mediaServicesWereResetNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(configurationChanged),
+            name: .AVAudioEngineConfigurationChange, object: nil)
+        displayTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            self.mailbox.lock()
+            let step = self.reportedStep
+            self.mailbox.unlock()
+            self.currentStep = self.isPlaying ? step : -1
+        }
     }
 
-    private func setupAudioEngine() {
-        let audioSession = AVAudioSession.sharedInstance()
+    private func publishSettings() {
+        mailbox.lock()
+        pending = patch
+        mailbox.unlock()
+    }
 
+    func play() {
+        guard patch.isValid else { message = "Invalid pattern settings."; return }
         do {
-            try audioSession.setCategory(.playback, options: [.duckOthers])
-            try audioSession.setPreferredSampleRate(44_100)
-            try audioSession.setPreferredIOBufferDuration(0.005)
-            try audioSession.setActive(true)
-
-            let sampleRate = audioSession.sampleRate > 0 ? audioSession.sampleRate : 44_100
-            let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
-
-            stateLock.lock()
-            renderState.sampleRate = sampleRate
-            stateLock.unlock()
-
-            let oscillator = AVAudioSourceNode(format: format) { [weak self] _, _, frameCount, audioBufferList in
-                self?.render(frameCount: frameCount, audioBufferList: audioBufferList)
-                return noErr
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .default)
+            try session.setPreferredIOBufferDuration(0.005)
+            try session.setActive(true)
+            if !configured {
+                let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!
+                let source = AVAudioSourceNode(format: format) { [weak self] _, _, count, buffers in
+                    guard let self = self else {
+                        for buffer in UnsafeMutableAudioBufferListPointer(buffers) {
+                            if let data = buffer.mData { memset(data, 0, Int(buffer.mDataByteSize)) }
+                        }
+                        return noErr
+                    }
+                    self.render(count, buffers)
+                    return noErr
+                }
+                audioEngine.attach(source)
+                audioEngine.connect(source, to: audioEngine.mainMixerNode, format: format)
+                configured = true
             }
-
-            let filter = AVAudioUnitEQ(numberOfBands: 1)
-            filter.bands[0].filterType = .lowPass
-            filter.bands[0].frequency = Float(filterCutoff)
-            filter.bands[0].bandwidth = 1.0
-            filter.bands[0].gain = 0
-
-            audioEngine.attach(oscillator)
-            audioEngine.attach(filter)
-            audioEngine.connect(oscillator, to: filter, format: format)
-            audioEngine.connect(filter, to: audioEngine.mainMixerNode, format: format)
-
-            try audioEngine.start()
-
-            filterNode = filter
-            isRunning = true
+            if !audioEngine.isRunning { try audioEngine.start() }
+            mailbox.lock()
+            pending = patch
+            requestedPlay = true
+            revision += 1
+            mailbox.unlock()
+            isPlaying = true
         } catch {
-            print("Error setting up audio engine: \(error)")
+            stop()
+            message = "Audio could not start: \(error.localizedDescription)"
         }
     }
 
-    func playNote(frequency: Double) {
-        self.frequency = frequency
-        updateFilter()
-
-        if !isRunning {
-            setupAudioEngine()
-        }
-
-        guard isRunning else { return }
-
-        stateLock.lock()
-        currentNoteID += 1
-        let noteID = currentNoteID
-        renderState.frequency = frequency
-        renderState.waveform = Int(waveform.rounded())
-        renderState.noteOnSample = renderState.samplePosition
-        renderState.releaseStartSample = nil
-        renderState.releaseStartLevel = 0
-        stateLock.unlock()
-
-        let gateLength = max(0.08, min(1.2, attack + decay + release + 0.08))
-        DispatchQueue.main.asyncAfter(deadline: .now() + gateLength) { [weak self] in
-            self?.beginRelease(for: noteID)
-        }
+    func stop() {
+        mailbox.lock()
+        requestedPlay = false
+        mailbox.unlock()
+        isPlaying = false
+        currentStep = -1
     }
 
-    private func render(frameCount: AVAudioFrameCount, audioBufferList: UnsafeMutablePointer<AudioBufferList>) {
-        stateLock.lock()
-        var state = renderState
-        stateLock.unlock()
-
-        let bufferList = UnsafeMutableAudioBufferListPointer(audioBufferList)
-
-        for frame in 0..<Int(frameCount) {
-            let level = envelopeLevel(for: state, at: state.samplePosition)
-            let oscillator = sampleValue(phase: state.phase, waveform: state.waveform)
-            let output = Float(oscillator * level * (0.18 + state.envelopeAmount * 0.26))
-
-            for buffer in bufferList {
-                let pointer = buffer.mData?.assumingMemoryBound(to: Float.self)
-                pointer?[frame] = output
+    private func render(_ count: AVAudioFrameCount, _ buffers: UnsafeMutablePointer<AudioBufferList>) {
+        // Never wait for the UI thread: keep the previous settings if a write is in progress.
+        if mailbox.try() {
+            cached = pending
+            renderPlay = requestedPlay
+            if renderRevision != revision {
+                dsp.reset()
+                fade = 0
+                renderRevision = revision
             }
+            reportedStep = renderPlay ? dsp.stepIndex : -1
+            mailbox.unlock()
+        }
+        let list = UnsafeMutableAudioBufferListPointer(buffers)
+        for i in 0..<Int(count) {
+            fade += ((renderPlay ? 1.0 : 0.0) - fade) * 0.005
+            let value = (renderPlay || fade > 0.00001) ? dsp.nextSample(cached) * Float(fade) : 0
+            for buffer in list { buffer.mData?.assumingMemoryBound(to: Float.self)[i] = value }
+        }
+    }
 
-            state.phase += state.frequency / state.sampleRate
-            if state.phase >= 1 {
-                state.phase -= floor(state.phase)
+    func generateRhythm(pulses: Int, rotation: Int, lane: Int) {
+        undoPatch = patch
+        canUndo = true
+        patch.generateRhythm(pulses: pulses, rotation: rotation, lane: lane)
+    }
+
+    func selectTone(_ model: Int) {
+        undoPatch = patch
+        canUndo = true
+        var next = patch
+        next.applyTone(model)
+        patch = next
+    }
+
+    func mutate() {
+        undoPatch = patch
+        canUndo = true
+        patch.mutate(seed: UInt64.random(in: 0...UInt64.max))
+    }
+
+    func undoGeneration() {
+        guard let previous = undoPatch else { return }
+        patch = previous
+        undoPatch = nil
+        canUndo = false
+    }
+
+    func replacePatch(_ replacement: GroovePatch) {
+        stop()
+        undoPatch = patch
+        canUndo = true
+        patch = replacement
+    }
+
+    func save(slot: Int) {
+        do {
+            let data = try JSONEncoder().encode(patch)
+            UserDefaults.standard.set(data, forKey: "groove.v1.slot.\(slot)")
+            message = "Saved to slot \(slot)."
+        } catch { message = "Could not save: \(error.localizedDescription)" }
+    }
+
+    func load(slot: Int) {
+        guard let data = UserDefaults.standard.data(forKey: "groove.v1.slot.\(slot)") else {
+            message = "Slot \(slot) is empty."; return
+        }
+        do {
+            let saved = try JSONDecoder().decode(GroovePatch.self, from: data)
+            guard saved.isValid else { message = "This saved pattern is invalid."; return }
+            replacePatch(saved)
+        } catch { message = "Could not load: \(error.localizedDescription)" }
+    }
+
+    func exportWAV(includeTail: Bool = false) {
+        guard !isExporting, patch.isValid else { return }
+        isExporting = true
+        let snapshot = patch
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            do {
+                let url = try Self.writeWAV(snapshot, includeTail: includeTail)
+                DispatchQueue.main.async { self?.isExporting = false; self?.exportURL = url }
+            } catch {
+                DispatchQueue.main.async {
+                    self?.isExporting = false
+                    self?.message = "Export failed: \(error.localizedDescription)"
+                }
             }
-
-            state.samplePosition += 1
-        }
-
-        stateLock.lock()
-        renderState.phase = state.phase
-        renderState.samplePosition = state.samplePosition
-        stateLock.unlock()
-    }
-
-    private func sampleValue(phase: Double, waveform: Int) -> Double {
-        switch min(max(waveform, 0), 3) {
-        case 0:
-            return phase * 2 - 1
-        case 1:
-            return phase < 0.5 ? 1 : -1
-        case 2:
-            return 1 - 4 * abs(phase - 0.5)
-        default:
-            return sin(phase * 2 * .pi)
         }
     }
 
-    private func envelopeLevel(for state: RenderState, at samplePosition: UInt64) -> Double {
-        guard let noteOnSample = state.noteOnSample else { return 0 }
-
-        if let releaseStartSample = state.releaseStartSample {
-            let elapsed = seconds(from: releaseStartSample, to: samplePosition, sampleRate: state.sampleRate)
-            guard state.release > 0 else { return 0 }
-            return max(0, state.releaseStartLevel * (1 - elapsed / state.release))
+    private static func writeWAV(_ snapshot: GroovePatch, includeTail: Bool) throws -> URL {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("SynthMaker-Exports", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("SynthMaker-\(UUID().uuidString.prefix(8)).wav")
+        let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!
+        let file = try AVAudioFile(forWriting: url, settings: format.settings)
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1024)!
+        var renderer = GrooveDSP(sampleRate: 44_100)
+        let musicalFrames = Int((44_100 * 60 / snapshot.tempo * 16).rounded()) // Four bars.
+        let tailSeconds = includeTail ? (snapshot.tone.pad?.release ?? 0) + 2 : 0
+        let frames = musicalFrames + Int(tailSeconds * 44_100)
+        var position = 0
+        while position < frames {
+            let length = min(1024, frames - position)
+            buffer.frameLength = AVAudioFrameCount(length)
+            for i in 0..<length {
+                // Short edge fades prevent clicks in the exported file.
+                let fade = min(1, min(Double(position + i) / 220, Double(frames - position - i - 1) / 220))
+                let frame = position + i
+                if frame == musicalFrames { renderer.releaseLumaVoices() }
+                buffer.floatChannelData![0][i] = renderer.nextSample(snapshot, triggerNotes: frame < musicalFrames) * Float(fade)
+            }
+            try file.write(from: buffer)
+            position += length
         }
+        return url
+    }
 
-        let elapsed = seconds(from: noteOnSample, to: samplePosition, sampleRate: state.sampleRate)
-        if elapsed < state.attack {
-            guard state.attack > 0 else { return 1 }
-            return elapsed / state.attack
+    @objc private func interrupted(_ notification: Notification) {
+        guard let type = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+              type == AVAudioSession.InterruptionType.began.rawValue else { return }
+        DispatchQueue.main.async { [weak self] in self?.stop() }
+    }
+
+    @objc private func routeChanged(_ notification: Notification) {
+        guard let reason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+              reason == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue else { return }
+        DispatchQueue.main.async { [weak self] in self?.stop() }
+    }
+
+    @objc private func mediaReset(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            self?.stop()
+            self?.audioEngine.stop()
+            self?.audioEngine = AVAudioEngine()
+            self?.configured = false
+            self?.message = "Audio service restarted. Press Play to reconnect audio."
         }
+    }
 
-        let decayElapsed = elapsed - state.attack
-        if decayElapsed < state.decay {
-            guard state.decay > 0 else { return state.sustain }
-            let decayProgress = decayElapsed / state.decay
-            return 1 - (1 - state.sustain) * decayProgress
+    @objc private func configurationChanged(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, !self.audioEngine.isRunning else { return }
+            self.stop()
         }
-
-        return state.sustain
-    }
-
-    private func seconds(from start: UInt64, to end: UInt64, sampleRate: Double) -> Double {
-        Double(end >= start ? end - start : 0) / sampleRate
-    }
-
-    private func beginRelease(for noteID: Int) {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-
-        guard noteID == currentNoteID, renderState.releaseStartSample == nil else { return }
-
-        renderState.releaseStartSample = renderState.samplePosition
-        renderState.releaseStartLevel = envelopeLevel(for: renderState, at: renderState.samplePosition)
-    }
-
-    private func updateRenderSettings() {
-        stateLock.lock()
-        renderState.frequency = frequency
-        renderState.waveform = Int(waveform.rounded())
-        renderState.envelopeAmount = envelopeAmount
-        renderState.attack = attack
-        renderState.decay = decay
-        renderState.sustain = sustain
-        renderState.release = release
-        stateLock.unlock()
-    }
-
-    private func updateFilter() {
-        guard let band = filterNode?.bands.first else { return }
-
-        band.frequency = Float(filterCutoff)
-        band.bandwidth = Float(max(0.05, 1.4 - resonance * 0.11))
     }
 
     deinit {
+        displayTimer?.invalidate()
+        NotificationCenter.default.removeObserver(self)
         audioEngine.stop()
     }
 }
